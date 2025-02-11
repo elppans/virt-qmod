@@ -1,0 +1,737 @@
+#!/bin/bash
+# shellcheck disable=SC1090,SC2140,SC2181,SC2034,SC2086
+
+# Nome do script
+VQCLI=$(basename "$0")
+
+# Arquivo de configuração do script
+CONFIG_FILE="$HOME/.config/virt-qemu-mod/virt-qemu-mod.env"
+
+# Função para carregar ou criar o arquivo de configuração
+carregar_config() {
+    # Verifica se o arquivo de configuração já existe
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # Se o arquivo existir, carrega as configurações
+        source "$CONFIG_FILE"
+    else
+        # Se o arquivo não existir, cria o diretório e o arquivo de configuração padrão
+        CONFIG_DIR="$(dirname "$CONFIG_FILE")"
+        mkdir -p "$CONFIG_DIR"
+        cat <<EOF >"$CONFIG_FILE"
+# Arquivo de configuração para o script
+NAME="myvm"
+RAM=2048
+VCPUS=1
+DISK=20
+NETWORK="bridge0"
+GRAPHICS="--graphics spice"
+DISK_FORMAT="qcow2"
+DISK_PATH="$HOME/VirtualMachines"
+OSTYPE="other"
+OSVARIANT="unknown"
+export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1
+EOF
+        # Carrega o arquivo de configuração criado
+        source "$CONFIG_FILE"
+    fi
+}
+
+# Função para verificar se o dono do arquivo é o mesmo usuário que está executando o script
+verificar_dono_arquivo() {
+    # Recebe o caminho do arquivo como argumento
+    local arquivo="$1"
+
+    # Verifica se o arquivo existe
+    if [ ! -e "$arquivo" ]; then
+        echo "Erro: O arquivo '$arquivo' não existe."
+        return 1
+    fi
+
+    # Obtém o nome do usuário atual (quem está executando o script)
+    local usuario
+    usuario=$(whoami)
+
+    # Obtém o nome do usuário que é o dono do arquivo
+    local dono_arquivo
+    dono_arquivo=$(stat -c %U "$arquivo")
+
+    # Compara o usuário atual com o dono do arquivo
+    if [ ! "$usuario" == "$dono_arquivo" ]; then
+        # echo "O usuário '$usuario' é o dono do arquivo '$arquivo'."
+        # else
+        # echo "O usuário '$usuario' não é o dono do arquivo '$arquivo'. O dono é '$dono_arquivo'."
+        echo "Alterando a propriedade do arquivo para o usuário '$usuario'..."
+
+        # Altera o dono do arquivo para o usuário atual usando sudo
+        sudo chown "$usuario:$usuario" "$arquivo"
+
+        if [ $? -eq 0 ]; then
+            echo "Propriedade do arquivo '$arquivo' foi alterada com sucesso para '$usuario'."
+        else
+            echo "Erro ao alterar a propriedade do arquivo '$arquivo'."
+        fi
+    fi
+}
+
+# Função para verificar se os comandos necessários estão instalados
+verificar_comandos() {
+    # Lista de comandos obrigatórios
+    for cmd in pv bc virt-viewer qemu-img virsh virt-install; do
+        # Verifica se o comando está disponível no sistema
+        if ! command -v "$cmd" >/dev/null; then
+            # Caso algum comando não esteja presente, exibe uma mensagem e sai
+            echo "O utilitário $cmd não está instalado. Instale-o para usar este script."
+            exit 1
+        fi
+    done
+}
+
+# Função para mostrar o tamanho de um arquivo
+mostrar_tamanho() {
+    tamanho=$(du -h "$1" | awk '{print $1}')
+    echo "Tamanho do arquivo $(basename "$1"): $tamanho"
+}
+
+# Converte bytes para MB ou GB
+converter_para_humanos() {
+    local tamanho=$1
+    if [ "$tamanho" -ge 1000000000 ]; then
+        echo "$(bc -l <<<"$tamanho / 1000000000") GB"
+    elif [ "$tamanho" -ge 1000000 ]; then
+        echo "$(bc -l <<<"$tamanho / 1000000") MB"
+    else
+        echo "$tamanho bytes"
+    fi
+}
+
+# Função para comprimir arquivos .qcow2
+compress_only() {
+    # Exibe mensagem inicial
+    echo "Iniciando a compressão de arquivos .qcow2 em $DISK_PATH"
+
+    # Itera sobre todos os arquivos .qcow2 no diretório de discos
+    for arquivo in "$DISK_PATH"/*.qcow2; do
+        # Verifica se o arquivo realmente existe
+        if [ -f "$arquivo" ]; then
+            verificar_dono_arquivo "$arquivo"
+            # Exibe o nome do arquivo sendo processado
+            echo "Processando o arquivo: $(basename "$arquivo")"
+
+            # Obtém o tamanho do arquivo antes da compressão
+            local tamanho_anterior
+            tamanho_anterior=$(stat -c %s "$arquivo")
+            mostrar_tamanho "$arquivo"
+
+            # Define o nome do arquivo comprimido
+            local nome_arquivo
+            nome_arquivo="$(basename "$arquivo" .qcow2)"
+
+            local arquivo_destino
+            arquivo_destino="$DISK_PATH/$nome_arquivo-comprimido.qcow2"
+
+            # Obtém o tamanho do arquivo para informar ao pv
+            local tamanho_arquivo
+            tamanho_arquivo=$(stat -c %s "$arquivo")
+
+            # Comprime o arquivo .qcow2 utilizando qemu-img
+            # sleep 2
+            # sudo chmod 0666 "$arquivo"
+            qemu-img convert -c -O qcow2 "$arquivo" "$arquivo_destino" | pv -s "$tamanho_arquivo" -petrb -N "Comprimindo $nome_arquivo"
+
+            # Verifica se a compressão foi bem-sucedida
+            if [ $? -eq 0 ]; then
+                # Exibe mensagem de sucesso
+                echo "Arquivo $(basename "$arquivo") comprimido com sucesso."
+                mostrar_tamanho "$arquivo_destino"
+                qemu-img check "$arquivo_destino"
+
+                # Verifica se o arquivo comprimido está consistente
+                if [ $? -eq 0 ]; then
+                    echo "Arquivo $(basename "$arquivo_destino") está consistente."
+                    # Substitui o arquivo original pelo comprimido
+                    mv -f "$arquivo_destino" "$arquivo"
+                    # sudo chmod 0644 "$arquivo"
+                    # Exibe a diferença de tamanho entre o arquivo original e o comprimido
+                    local tamanho_atual
+                    tamanho_atual=$(stat -c %s "$arquivo")
+                    local tamanho_diferenca
+                    tamanho_diferenca=$((tamanho_anterior - tamanho_atual))
+                    echo "Diferença de tamanho: $(converter_para_humanos "$tamanho_diferenca")"
+                else
+                    echo "Erro: o arquivo $(basename "$arquivo_destino") não está consistente."
+                fi
+            else
+                echo "Erro ao comprimir o arquivo $(basename "$arquivo")."
+            fi
+        fi
+    done
+    echo "Conclusão."
+}
+
+# Função para listar todas as máquinas virtuais
+list_vms() {
+    # Exibe todas as VMs (ativas e inativas)
+    virsh list --all
+}
+
+# Função para Abrir o Virt Viewer para mostrar a tela da VM especificada
+open_vm() {
+    # Abre o Virt Viewer com a VM especificada pelo nome
+    virt-viewer "$1"
+}
+
+# Função para edição manual do XML da Máquina Virtual especificada.
+edit_vm() {
+    # Edição da Máquina Virtual
+    virsh edit "$1"
+}
+# Função para iniciar uma máquina virtual
+start_vm() {
+    # Inicia a VM especificada pelo nome
+    virsh start "$1"
+}
+
+# Função para parar uma máquina virtual de maneira graciosa
+stop_vm() {
+    # Para a VM especificada pelo nome
+    virsh shutdown "$1"
+}
+
+# Função para parar uma máquina virtual de forma forçada
+stop_force_vm() {
+    # Para a VM especificada de forma forçada (desliga sem esperar)
+    virsh destroy "$1"
+}
+
+# Função para remover uma máquina virtual
+remove_vm() {
+    # Remove a VM especificada pelo nome e a configuração de NVRAM (se houver)
+    virsh undefine "$1" --nvram
+}
+
+# Função para exibir informações sobre o disco de uma máquina virtual
+show_vm_disk_info() {
+    # Exibe as informações do disco da VM especificada
+    virsh domblkinfo "$1" --human "${2:---all}"
+}
+
+# Função para exibir informações do arquivo .qcow2 usando fdisk -l
+show_qcow2_fdisk() {
+    if [ $# -ne 1 ]; then
+        echo "Uso: $0 show_qcow2_fdisk ARQUIVO_QCOW2"
+        exit 1
+    fi
+
+    arquivo_qcow2="$1"
+
+    loop_device=$(sudo losetup -f --show "$arquivo_qcow2")
+    if [ -z "$loop_device" ]; then
+        echo "Não foi possível montar o arquivo QCOW2."
+        exit 1
+    fi
+
+    sudo fdisk -l "$loop_device"
+    sudo losetup -d "$loop_device"
+    exit 0
+}
+
+# Função para exibir informações sobre o disco QCOW2
+show_qcow2_info() {
+    # Obtém o caminho do arquivo .qcow2 associado à VM
+    local caminho_arquivo
+    caminho_arquivo=$(virsh domblklist "$1" --details | awk '/disk/ {print $4}')
+
+    # Se o arquivo existir, exibe as informações do disco
+    if [ -n "$caminho_arquivo" ]; then
+        sudo qemu-img info "$caminho_arquivo"
+    else
+        echo "Máquina virtual não encontrada ou sem disco associado."
+    fi
+}
+
+# Função para redimensionar o disco de uma máquina virtual
+resize_vm_disk() {
+    # Obtém o caminho do arquivo .qcow2 associado à VM
+    local caminho_arquivo
+    caminho_arquivo=$(virsh domblklist "$1" --details | awk '/disk/ {print $4}')
+
+    # Se o arquivo existir, redimensiona o disco
+    if [ -f "$caminho_arquivo" ]; then
+        qemu-img resize "$caminho_arquivo" +"$2"G
+        echo "Tamanho do disco aumentado em $2 GB."
+    else
+        echo "Arquivo .qcow2 não encontrado."
+    fi
+}
+
+# Função para reduzir o tamanho do disco de uma máquina virtual
+shrink_vm_disk() {
+    # Obtém o caminho do arquivo .qcow2 associado à VM
+    local caminho_arquivo
+    caminho_arquivo=$(virsh domblklist "$1" --details | awk '/disk/ {print $4}')
+
+    # Se o arquivo existir, reduz o tamanho do disco
+    if [ -f "$caminho_arquivo" ]; then
+        qemu-img resize --shrink "$caminho_arquivo" -"$2"G
+        echo "Tamanho do disco diminuído em $2 GB."
+    else
+        echo "Arquivo .qcow2 não encontrado."
+    fi
+}
+
+# Função para montar um disco QCOW2
+cfdisk_qcow2() {
+    # Monta a partição do disco QCOW2 e exibe o cfdisk
+    local loop_device
+    loop_device=$(sudo losetup -f --show "$1")
+
+    sudo cfdisk "$loop_device"
+    # Desmonta o loop device após o uso
+    sudo losetup -d "$loop_device"
+}
+
+# Função para listar os snapshots de uma VM
+list_snapshots() {
+    # Lista todos os snapshots de uma VM
+    virsh snapshot-list "$1"
+}
+
+# Função para criar um snapshot de uma VM
+create_snapshot() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 create_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    nome_snapshot="$2"
+    virsh snapshot-create-as "$nome_maquina" "$nome_snapshot" "Snapshot criado através do script"
+}
+
+# Função para excluir um snapshot de uma VM
+delete_snapshot() {
+    # Deleta o snapshot especificado da VM
+    virsh snapshot-delete "$1" "$2"
+}
+
+# Função para verificar e corrigir erros em um arquivo QCOW2
+check_qcow2() {
+    tipo_verificacao="$2"
+    local arquivo_qcow2
+    arquivo_qcow2="$3"
+
+    if [ "$2" = "-h" ] || [ "$2" = "--help" ]; then
+        echo "Uso: $0 TIPO_ARQUIVO ARQUIVO_QCOW2"
+        echo "Tipos válidos: simple, leaks, all"
+        exit 0
+    fi
+
+    if [ $# -ne 3 ]; then
+        echo "Erro: Número incorreto de argumentos."
+        echo "Uso: $0 TIPO_ARQUIVO ARQUIVO_QCOW2"
+        echo "Tipos válidos: simple, leaks, all"
+        exit 1
+    fi
+
+    echo "tipo_verificacao de $tipo_verificacao"
+    echo "arquivo_qcow2 de $arquivo_qcow2"
+
+    case $tipo_verificacao in
+    simple)
+        qemu-img check "$arquivo_qcow2"
+        ;;
+    leaks | all)
+        qemu-img check -r "$tipo_verificacao" "$arquivo_qcow2"
+        ;;
+    *)
+        echo "Tipo de verificação inválido: $tipo_verificacao"
+        exit 1
+        ;;
+    esac
+    exit 0
+}
+
+# Função para verificar informações das CPUs de uma máquina virtual
+check_cpus() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 check_cpus NOME_DA_MAQUINA"
+        exit 1
+    fi
+
+    nome_maquina="$2"
+    virsh vcpuinfo "$nome_maquina"
+}
+
+# Função para verificar informações das interfaces de rede de uma máquina virtual
+check_interfaces() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 check_interfaces NOME_DA_MAQUINA"
+        exit 1
+    fi
+
+    nome_maquina="$2"
+    virsh domiflist "$nome_maquina"
+}
+
+# Função para verificar se uma ISO está montada em uma máquina virtual
+check_iso() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 check_iso NOME_DA_MAQUINA"
+        exit 1
+    fi
+
+    nome_maquina="$2"
+    iso_path=$(virsh domblklist "$nome_maquina" | awk '$0 ~ /cdrom/ || $2 ~ /\.iso$/ { print $2 }')
+
+    if [ -z "$iso_path" ]; then
+        echo "Não há ISO montada na máquina virtual $nome_maquina."
+    else
+        echo "A ISO $iso_path está montada na máquina virtual $nome_maquina."
+    fi
+}
+
+# Função para montar uma ISO em uma máquina virtual
+# Função para montar a ISO em um dispositivo livre da máquina virtual
+attach_iso() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 attach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    caminho_iso="$2"
+
+    # Verifica dispositivos livres
+    devices_livres=()
+    for device in hdb hdc hdd hde hdf; do
+        virsh domblkinfo "$nome_maquina" "$device" &>/dev/null
+        if [ $? -eq 1 ]; then
+            devices_livres+=("$device")
+        fi
+    done
+
+    if [ ${#devices_livres[@]} -eq 0 ]; then
+        novo_device="hdd"
+        echo "Não há dispositivos livres. Criando novo dispositivo: $novo_device"
+        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --type cdrom --mode readonly
+        virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --driver qemu --subdriver qcow2 --config --persistent
+
+    else
+        device_livre="${devices_livres[0]}"
+        echo "Adicionando ISO ao dispositivo livre: $device_livre"
+        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --mode readonly
+        virsh change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
+    fi
+}
+
+# Função para garantir que a VM inicialize primeiro pelo CD-ROM antes do HD
+set_boot_cdrom() {
+    # Parâmetro: Nome da máquina virtual
+    local VM_NAME="$1"
+
+    # Verifica se o nome da VM foi fornecido
+    if [ -z "$VM_NAME" ]; then
+        echo "Uso: set_boot_cdrom <nome-da-vm>"
+        return 1  # Retorna código de erro 1 (indicando falha)
+    fi
+
+    # Obtém a configuração XML da VM e armazena na variável VM_XML
+    local VM_XML
+    VM_XML=$(virsh dumpxml "$VM_NAME")
+
+    # Verifica se a ordem de boot já tem o CD-ROM como primeira opção
+    if echo "$VM_XML" | grep -q "<boot dev='cdrom'/>"; then
+        echo "A VM '$VM_NAME' já está configurada para boot pelo CD-ROM."
+    else
+        echo "Alterando a ordem de boot da VM '$VM_NAME' para CD-ROM primeiro..."
+
+        # Modifica a ordem de boot para colocar o CD-ROM antes do HD
+        virsh dumpxml "$VM_NAME" | \
+            sed 's|<boot dev=.*/>|<boot dev="cdrom"/>\n    <boot dev="hd"/>|' | \
+            virsh define /dev/stdin
+
+        echo "Ordem de boot atualizada para CD-ROM primeiro!"
+    fi
+}
+
+# Função para desmontar o dispositivo de CD-ROM montado (EM EDIÇÃO)
+# Função para desmontar a ISO da máquina virtual
+detach_iso() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 attach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    caminho_iso="$2"
+    VM_NAME="$nome_maquina"
+
+    # Detectar o dispositivo onde a ISO está montada
+    iso_device=$(virsh domblklist "$VM_NAME" --details | grep cdrom | awk '{print $3}')
+
+    if [ -n "$iso_device" ]; then
+        # Desmontar a ISO usando o comando virsh change-media
+        virsh change-media "$VM_NAME" "$iso_device" --eject
+        echo "ISO removida com sucesso da máquina virtual $VM_NAME."
+    else
+        echo "Nenhuma ISO montada encontrada na máquina virtual $VM_NAME."
+    fi
+}
+
+# Verifica a configuração gráfica da VM
+check_graphics() {
+    virsh dumpxml "$1" | grep graphics
+}
+# Função para exibir a ajuda do script
+print_help() {
+    # Exibe uma lista de opções de uso do script
+    echo "Uso: $VQCLI [-h] [--compress-only] [list_vms | start NOME_DA_MAQUINA | stop NOME_DA_MAQUINA ...]"
+    echo "  -h, --help                Exibe esta mensagem de ajuda"
+    echo "  create                    Cria uma Máquina Virtual. Suporta as opções {--(name,ram,vcpus,disk,cdrom,network,graphics,os-variant)}"
+    echo "  --name <nome>             Define o nome da VM"
+    echo "  --ram <tamanho>           Define a quantidade de RAM para a VM"
+    echo "  --vcpus <número>          Define o número de vCPUs para a VM"
+    echo "  --disk <tamanho>          Define o tamanho do disco da VM"
+    echo "  --cdrom <caminho>         Define o caminho do CD-ROM"
+    echo "  --network <rede>          Define a rede para a VM"
+    echo "  --graphics <tipo>         Define o tipo de gráfico para a VM"
+    echo "  --graphics <tipo>         Define o tipo de gráfico para a VM"
+    echo "  --os-variant              Define uma variante para o sistema operacional {list_variant}. (Padrão unknown)"
+    echo "  --compress-only           Realiza apenas a compactação dos arquivos"
+    echo "  list                      Lista as VMs"
+    echo "  list_variant              Lista todos os sistemas operacionais disponíveis para a criação da Máquina Virtual"
+    echo "  open                      Abre o Virt Viewer com a VM em execução especificada. (Verificar com list_vms)"
+    echo "  edit                   Edição manual (vi) do XML da Máquina Virtual especificada. (Verificar com list_vms (Deve estar desativada))"
+    echo "  start <nome>           Inicia a VM"
+    echo "  stop <nome>            Para a VM"
+    echo "  stop_force <nome>      Para a VM forçadamente"
+    echo "  remove <nome>          Remove a VM"
+    echo "  show_disk_info <nome>  Exibe informações sobre o disco da VM"
+    echo "  show_qcow2_fdisk <arquivo> Exibe informações sobre a partição do disco QCOW2"
+    echo "  show_qcow2_info <nome> Exibe informações sobre o disco QCOW2 da VM"
+    echo "  resize_disk <nome> <tamanho> Redimensiona o disco da VM"
+    echo "  shrink_disk <nome> <tamanho> Encolhe o disco da VM"
+    echo "  cfdisk_qcow2 <arquivo>     Monta o arquivo QCOW2 e abre edição com cfdisk"
+    echo "  list_snapshots <nome>     Lista os snapshots da VM"
+    echo "  create_snapshot <nome> <snapshot> Cria um snapshot da VM"
+    echo "  delete_snapshot <nome> <snapshot> Deleta um snapshot da VM"
+    echo "  check_qcow2 <arquivo> <opções> Verifica a integridade do disco no arquivo QCOW2"
+    echo "  check_cpus <nome>         Verifica os CPUs da VM"
+    echo "  check_interfaces <nome>   Verifica as interfaces da VM"
+    echo "  check_iso <nome>          Verifica a existência do arquivo ISO na VM"
+    echo "  check_graphics <nome>     Verifica a configuração gráfica da VM"
+    echo "  attach_iso <nome> <iso>   Anexa o ISO à VM"
+    echo "  detach_iso <nome> <iso>   Desanexa o ISO da VM"
+    echo "  set_boot_cdrom <nome>     Define ordem de boot para inicializar primeiro pelo CD-ROM antes do HD"
+}
+
+# Função para criar a máquina virtual com os parâmetros definidos
+# Função para criar a VM
+create_vm() {
+    echo -e "
+    Nome: $NAME
+    Memória: $RAM
+    CPUs: $VCPUS
+    Disco: $DISK
+    Media: $CDROM
+    Rede: $NETWORK
+    Gráficos: $GRAPHICS
+    Variante: $OSVARIANT
+    "
+    # exit
+
+    # Verifica se todos os parâmetros necessários foram definidos
+    if [[ -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$NETWORK" || -z "$GRAPHICS" ]]; then
+        echo "Erro: Todos os parâmetros (name, ram, vcpus, disk, cdrom, network, graphics) devem ser fornecidos."
+        exit 1
+    fi
+
+    # Executa o virt-install
+    virt-install \
+        --name "$NAME" \
+        --ram "$RAM" \
+        --vcpus "$VCPUS" \
+        --boot uefi \
+        --disk "$DISK_PATH/$NAME.qcow2",size="$DISK",format="$DISK_FORMAT" \
+        --cdrom "$CDROM" \
+        --network bridge="$NETWORK",model=virtio \
+        --os-variant="$OSVARIANT" \
+        --noreboot \
+        --noautoconsole \
+        $GRAPHICS
+
+}
+
+# Função para processar os parâmetros de linha de comando
+process_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            create_vm)
+                shift  # Remove o 'create_vm'
+                ;;
+            --cdrom)
+                CDROM="$2"
+                shift 2  # Move para o próximo argumento
+                ;;
+            --name)
+                NAME="$2"
+                shift 2
+                ;;
+            --ram)
+                RAM="$2"
+                shift 2
+                ;;
+            --vcpus)
+                VCPUS="$2"
+                shift 2
+                ;;
+            --disk)
+                DISK="$2"
+                shift 2
+                ;;
+            --network)
+                NETWORK="$2"
+                shift 2
+                ;;
+            --graphics)
+                GRAPHICS="$2"
+                shift 2
+                ;;
+            --os-variant)
+                OSVARIANT="$2"
+                shift 2
+                ;;
+            *)
+                echo "Erro: Opção inválida $1"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Função principal
+main() {
+    # Verifica os comandos necessários
+    verificar_comandos
+
+    # Carrega as configurações do arquivo
+    carregar_config
+
+    # Interpretação dos parâmetros
+    case "$1" in
+    -h | --help)
+        print_help
+        ;;
+    --compress-only)
+        compress_only
+        ;;
+    list)
+        list_vms
+        ;;
+    list_variant)
+        osinfo-query os --fields=id,name,version --sort=name
+    ;;
+    start)
+        start_vm "$2"
+        ;;
+    stop)
+        stop_vm "$2"
+        ;;
+    stop_force)
+        stop_force_vm "$2"
+        ;;
+    remove)
+        remove_vm "$2"
+        ;;
+    show_disk_info)
+        show_vm_disk_info "$2"
+        ;;
+    show_qcow2_fdisk)
+        show_qcow2_fdisk "$2"
+        ;;
+    show_qcow2_info)
+        show_qcow2_info "$2"
+        ;;
+    resize_disk)
+        resize_vm_disk "$2" "$3"
+        ;;
+    shrink_disk)
+        shrink_vm_disk "$2" "$3"
+        ;;
+    cfdisk_qcow2)
+        cfdisk_qcow2 "$2"
+        ;;
+    list_snapshots)
+        list_snapshots "$2"
+        ;;
+    create_snapshot)
+        create_snapshot "$2" "$3"
+        ;;
+    delete_snapshot)
+        delete_snapshot "$2" "$3"
+        ;;
+    check_qcow2)
+        check_qcow2 "$@"
+        ;;
+    check_cpus)
+        check_cpus "$1" "$2"
+        exit 0
+        ;;
+    check_interfaces)
+        check_interfaces "$1" "$2"
+        exit 0
+        ;;
+    check_iso)
+        check_iso "$1" "$2"
+        exit 0
+        ;;
+    attach_iso)
+        attach_iso "$2" "$3"
+        exit 0
+        ;;
+    detach_iso)
+        detach_iso "$2" "$3"
+        exit 0
+        ;;
+    open)
+        open_vm "$2"
+        exit 0
+        ;;
+    edit)
+        edit_vm "$2"
+        exit 0
+        ;;
+    create)
+        # Processa os argumentos
+        process_args "$@"
+
+        # Verifica se a variável CDROM foi preenchida
+        # if [[ -z "$CDROM" ]]; then
+        #     echo "Erro: O parâmetro --cdrom é obrigatório."
+        #     exit 1
+        # fi
+
+        # Chama a função para criar a VM
+        create_vm
+        exit 0
+        ;;
+    set_boot_cdrom)
+        set_boot_cdrom "$2"
+        ;;
+    check_graphics)
+        check_graphics "$2"
+        ;;
+    *)
+        print_help
+        ;;
+    esac
+}
+
+# Chama a função principal
+main "$@"
+
+# Acessar a VM após configuração
+# Se configurou SPICE: remote-viewer spice://<IP_do_host>:<porta>
+# Se configurou VNC: vncviewer <IP_do_host>:<porta>
+# Descobrir a porta usada: "$0" check_graphics MeuVM
+
