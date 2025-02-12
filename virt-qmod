@@ -5,7 +5,18 @@
 VQCLI=$(basename "$0")
 
 # Arquivo de configuração do script
-CONFIG_FILE="$HOME/.config/virt-qemu-mod/virt-qemu-mod.env"
+CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
+
+# Verifica se o script está sendo executado como sudo
+if [[ -n "$SUDO_USER" ]]; then
+    # Se estiver rodando com sudo, redefinimos HOME para o diretório do usuário original
+    # `eval echo ~$SUDO_USER` retorna o home do usuário que chamou o sudo
+    HOME=$(eval echo ~$SUDO_USER)
+    
+    # Atualizamos o caminho do arquivo de configuração para garantir que ele seja lido do usuário correto
+    CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
+fi
+echo  "$CONFIG_FILE"
 
 # Função para carregar ou criar o arquivo de configuração
 carregar_config() {
@@ -17,24 +28,31 @@ carregar_config() {
         # Se o arquivo não existir, cria o diretório e o arquivo de configuração padrão
         CONFIG_DIR="$(dirname "$CONFIG_FILE")"
         mkdir -p "$CONFIG_DIR"
+        
+        # Cria um arquivo de configuração padrão
         cat <<EOF >"$CONFIG_FILE"
 # Arquivo de configuração para o script
+SESSION="qemu:///system"
 NAME="myvm"
 RAM=2048
 VCPUS=1
 DISK=20
+BOOT="uefi"
 NETWORK="bridge0"
-GRAPHICS="--graphics spice"
+SOUND="ich6"
+GRAPHICS="--graphics spice,listen=0.0.0.0"
 DISK_FORMAT="qcow2"
 DISK_PATH="$HOME/VirtualMachines"
 OSTYPE="other"
 OSVARIANT="unknown"
 export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1
 EOF
+
         # Carrega o arquivo de configuração criado
         source "$CONFIG_FILE"
     fi
 }
+
 
 # Função para verificar se o dono do arquivo é o mesmo usuário que está executando o script
 verificar_dono_arquivo() {
@@ -171,48 +189,48 @@ compress_only() {
 # Função para listar todas as máquinas virtuais
 list_vms() {
     # Exibe todas as VMs (ativas e inativas)
-    virsh list --all
+    virsh --connect $SESSION list --all
 }
 
 # Função para Abrir o Virt Viewer para mostrar a tela da VM especificada
 open_vm() {
     # Abre o Virt Viewer com a VM especificada pelo nome
-    virt-viewer "$1"
+    virt-viewer --connect "$SESSION" --reconnect --zoom=100 --direct --attach --auto-resize=always --cursor=auto --shared "$1"
 }
 
 # Função para edição manual do XML da Máquina Virtual especificada.
 edit_vm() {
     # Edição da Máquina Virtual
-    virsh edit "$1"
+    virsh --connect $SESSION edit "$1"
 }
 # Função para iniciar uma máquina virtual
 start_vm() {
     # Inicia a VM especificada pelo nome
-    virsh start "$1"
+    virsh --connect $SESSION start "$1"
 }
 
 # Função para parar uma máquina virtual de maneira graciosa
 stop_vm() {
     # Para a VM especificada pelo nome
-    virsh shutdown "$1"
+    virsh --connect $SESSION shutdown "$1"
 }
 
 # Função para parar uma máquina virtual de forma forçada
 stop_force_vm() {
     # Para a VM especificada de forma forçada (desliga sem esperar)
-    virsh destroy "$1"
+    virsh --connect $SESSION destroy "$1"
 }
 
 # Função para remover uma máquina virtual
 remove_vm() {
     # Remove a VM especificada pelo nome e a configuração de NVRAM (se houver)
-    virsh undefine "$1" --nvram
+    virsh --connect $SESSION undefine "$1" --nvram
 }
 
 # Função para exibir informações sobre o disco de uma máquina virtual
 show_vm_disk_info() {
     # Exibe as informações do disco da VM especificada
-    virsh domblkinfo "$1" --human "${2:---all}"
+    virsh --connect $SESSION domblkinfo "$1" --human "${2:---all}"
 }
 
 # Função para exibir informações do arquivo .qcow2 usando fdisk -l
@@ -239,7 +257,7 @@ show_qcow2_fdisk() {
 show_qcow2_info() {
     # Obtém o caminho do arquivo .qcow2 associado à VM
     local caminho_arquivo
-    caminho_arquivo=$(virsh domblklist "$1" --details | awk '/disk/ {print $4}')
+    caminho_arquivo=$(virsh --connect $SESSION domblklist "$1" --details | awk '/disk/ {print $4}')
 
     # Se o arquivo existir, exibe as informações do disco
     if [ -n "$caminho_arquivo" ]; then
@@ -253,7 +271,7 @@ show_qcow2_info() {
 resize_vm_disk() {
     # Obtém o caminho do arquivo .qcow2 associado à VM
     local caminho_arquivo
-    caminho_arquivo=$(virsh domblklist "$1" --details | awk '/disk/ {print $4}')
+    caminho_arquivo=$(virsh --connect $SESSION domblklist "$1" --details | awk '/disk/ {print $4}')
 
     # Se o arquivo existir, redimensiona o disco
     if [ -f "$caminho_arquivo" ]; then
@@ -268,7 +286,7 @@ resize_vm_disk() {
 shrink_vm_disk() {
     # Obtém o caminho do arquivo .qcow2 associado à VM
     local caminho_arquivo
-    caminho_arquivo=$(virsh domblklist "$1" --details | awk '/disk/ {print $4}')
+    caminho_arquivo=$(virsh --connect $SESSION domblklist "$1" --details | awk '/disk/ {print $4}')
 
     # Se o arquivo existir, reduz o tamanho do disco
     if [ -f "$caminho_arquivo" ]; then
@@ -293,7 +311,7 @@ cfdisk_qcow2() {
 # Função para listar os snapshots de uma VM
 list_snapshots() {
     # Lista todos os snapshots de uma VM
-    virsh snapshot-list "$1"
+    virsh --connect $SESSION snapshot-list "$1"
 }
 
 # Função para criar um snapshot de uma VM
@@ -305,13 +323,13 @@ create_snapshot() {
 
     nome_maquina="$1"
     nome_snapshot="$2"
-    virsh snapshot-create-as "$nome_maquina" "$nome_snapshot" "Snapshot criado através do script"
+    virsh --connect $SESSION snapshot-create-as "$nome_maquina" "$nome_snapshot" "Snapshot criado através do script"
 }
 
 # Função para excluir um snapshot de uma VM
 delete_snapshot() {
     # Deleta o snapshot especificado da VM
-    virsh snapshot-delete "$1" "$2"
+    virsh --connect $SESSION snapshot-delete "$1" "$2"
 }
 
 # Função para verificar e corrigir erros em um arquivo QCOW2
@@ -359,7 +377,7 @@ check_cpus() {
     fi
 
     nome_maquina="$2"
-    virsh vcpuinfo "$nome_maquina"
+    virsh --connect $SESSION vcpuinfo "$nome_maquina"
 }
 
 # Função para verificar informações das interfaces de rede de uma máquina virtual
@@ -370,7 +388,7 @@ check_interfaces() {
     fi
 
     nome_maquina="$2"
-    virsh domiflist "$nome_maquina"
+    virsh --connect $SESSION domiflist "$nome_maquina"
 }
 
 # Função para verificar se uma ISO está montada em uma máquina virtual
@@ -381,7 +399,7 @@ check_iso() {
     fi
 
     nome_maquina="$2"
-    iso_path=$(virsh domblklist "$nome_maquina" | awk '$0 ~ /cdrom/ || $2 ~ /\.iso$/ { print $2 }')
+    iso_path=$(virsh --connect $SESSION domblklist "$nome_maquina" | awk '$0 ~ /cdrom/ || $2 ~ /\.iso$/ { print $2 }')
 
     if [ -z "$iso_path" ]; then
         echo "Não há ISO montada na máquina virtual $nome_maquina."
@@ -404,7 +422,7 @@ attach_iso() {
     # Verifica dispositivos livres
     devices_livres=()
     for device in hdb hdc hdd hde hdf; do
-        virsh domblkinfo "$nome_maquina" "$device" &>/dev/null
+        virsh --connect $SESSION domblkinfo "$nome_maquina" "$device" &>/dev/null
         if [ $? -eq 1 ]; then
             devices_livres+=("$device")
         fi
@@ -414,13 +432,13 @@ attach_iso() {
         novo_device="hdd"
         echo "Não há dispositivos livres. Criando novo dispositivo: $novo_device"
         #virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --type cdrom --mode readonly
-        virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --driver qemu --subdriver qcow2 --config --persistent
+        virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --driver qemu --subdriver qcow2 --config --persistent
 
     else
         device_livre="${devices_livres[0]}"
         echo "Adicionando ISO ao dispositivo livre: $device_livre"
         #virsh attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --mode readonly
-        virsh change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
+        virsh --connect $SESSION change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
     fi
 }
 
@@ -437,7 +455,7 @@ set_boot_cdrom() {
 
     # Obtém a configuração XML da VM e armazena na variável VM_XML
     local VM_XML
-    VM_XML=$(virsh dumpxml "$VM_NAME")
+    VM_XML=$(virsh --connect $SESSION dumpxml "$VM_NAME")
 
     # Verifica se a ordem de boot já tem o CD-ROM como primeira opção
     if echo "$VM_XML" | grep -q "<boot dev='cdrom'/>"; then
@@ -446,7 +464,7 @@ set_boot_cdrom() {
         echo "Alterando a ordem de boot da VM '$VM_NAME' para CD-ROM primeiro..."
 
         # Modifica a ordem de boot para colocar o CD-ROM antes do HD
-        virsh dumpxml "$VM_NAME" | \
+        virsh --connect $SESSION dumpxml "$VM_NAME" | \
             sed 's|<boot dev=.*/>|<boot dev="cdrom"/>\n    <boot dev="hd"/>|' | \
             virsh define /dev/stdin
 
@@ -467,11 +485,11 @@ detach_iso() {
     VM_NAME="$nome_maquina"
 
     # Detectar o dispositivo onde a ISO está montada
-    iso_device=$(virsh domblklist "$VM_NAME" --details | grep cdrom | awk '{print $3}')
+    iso_device=$(virsh --connect $SESSION domblklist "$VM_NAME" --details | grep cdrom | awk '{print $3}')
 
     if [ -n "$iso_device" ]; then
         # Desmontar a ISO usando o comando virsh change-media
-        virsh change-media "$VM_NAME" "$iso_device" --eject
+        virsh --connect $SESSION change-media "$VM_NAME" "$iso_device" --eject
         echo "ISO removida com sucesso da máquina virtual $VM_NAME."
     else
         echo "Nenhuma ISO montada encontrada na máquina virtual $VM_NAME."
@@ -480,8 +498,14 @@ detach_iso() {
 
 # Verifica a configuração gráfica da VM
 check_graphics() {
-    virsh dumpxml "$1" | grep graphics
+    virsh --connect $SESSION dumpxml "$1" | grep graphics
 }
+
+# Verifica a configuração de som da VM
+check_sound() {
+    sudo virsh --connect $SESSION dumpxml "$1" | grep -A5 '<sound' | grep -v 'video' | grep -v 'vga'
+}
+
 # Função para exibir a ajuda do script
 print_help() {
     # Exibe uma lista de opções de uso do script
@@ -520,6 +544,7 @@ print_help() {
     echo "  check_interfaces <nome>   Verifica as interfaces da VM"
     echo "  check_iso <nome>          Verifica a existência do arquivo ISO na VM"
     echo "  check_graphics <nome>     Verifica a configuração gráfica da VM"
+    echo "  check_sound <nome>        Verifica a configuração do som da VM"
     echo "  attach_iso <nome> <iso>   Anexa o ISO à VM"
     echo "  detach_iso <nome> <iso>   Desanexa o ISO da VM"
     echo "  set_boot_cdrom <nome>     Define ordem de boot para inicializar primeiro pelo CD-ROM antes do HD"
@@ -527,34 +552,40 @@ print_help() {
 
 # Função para criar a máquina virtual com os parâmetros definidos
 # Função para criar a VM
-create_vm() {
+create() {
     echo -e "
+    Criando Máquina Virtual com as configurações a seguir:
+
+    Sessão: $SESSION
     Nome: $NAME
     Memória: $RAM
     CPUs: $VCPUS
     Disco: $DISK
+    Boot: $BOOT
     Media: $CDROM
     Rede: $NETWORK
+    Som: $SOUND
     Gráficos: $GRAPHICS
     Variante: $OSVARIANT
     "
     # exit
 
     # Verifica se todos os parâmetros necessários foram definidos
-    if [[ -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$NETWORK" || -z "$GRAPHICS" ]]; then
+    if [[ -z $SESSION || -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$BOOT" || -z "$NETWORK" || -z "$GRAPHICS" || -z "$SOUND" ]]; then
         echo "Erro: Todos os parâmetros (name, ram, vcpus, disk, cdrom, network, graphics) devem ser fornecidos."
         exit 1
     fi
 
     # Executa o virt-install
-    virt-install \
+    virt-install --connect $SESSION \
         --name "$NAME" \
         --ram "$RAM" \
         --vcpus "$VCPUS" \
-        --boot uefi \
+        --boot "$BOOT" \
         --disk "$DISK_PATH/$NAME.qcow2",size="$DISK",format="$DISK_FORMAT" \
         --cdrom "$CDROM" \
         --network bridge="$NETWORK",model=virtio \
+        --sound "$SOUND" \
         --os-variant="$OSVARIANT" \
         --noreboot \
         --noautoconsole \
@@ -566,7 +597,7 @@ create_vm() {
 process_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            create_vm)
+            create)
                 shift  # Remove o 'create_vm'
                 ;;
             --cdrom)
@@ -599,6 +630,18 @@ process_args() {
                 ;;
             --os-variant)
                 OSVARIANT="$2"
+                shift 2
+                ;;
+            --boot)
+                BOOT="$2"
+                shift 2
+                ;;
+            --sound)
+                SOUND="$2"
+                shift 2
+                ;;
+            --connect)
+                SESSION="$2"
                 shift 2
                 ;;
             *)
@@ -712,7 +755,7 @@ main() {
         # fi
 
         # Chama a função para criar a VM
-        create_vm
+        create
         exit 0
         ;;
     set_boot_cdrom)
@@ -720,6 +763,9 @@ main() {
         ;;
     check_graphics)
         check_graphics "$2"
+        ;;
+    check_sound)
+        check_sound "$2"
         ;;
     *)
         print_help
