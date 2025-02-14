@@ -16,7 +16,7 @@ if [[ -n "$SUDO_USER" ]]; then
     # Atualizamos o caminho do arquivo de configuração para garantir que ele seja lido do usuário correto
     CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
 fi
-echo  "$CONFIG_FILE"
+# echo  "$CONFIG_FILE"
 
 # Função para carregar ou criar o arquivo de configuração
 carregar_config() {
@@ -311,7 +311,14 @@ cfdisk_qcow2() {
 # Função para listar os snapshots de uma VM
 list_snapshots() {
     # Lista todos os snapshots de uma VM
-    virsh --connect $SESSION snapshot-list "$1"
+    if [ -z "$1" ]; then
+        echo "Uso: $0 list_snapshot NOME_DA_MAQUINA"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    virsh --connect $SESSION snapshot-list "$nome_maquina"
+
 }
 
 # Função para criar um snapshot de uma VM
@@ -329,7 +336,26 @@ create_snapshot() {
 # Função para excluir um snapshot de uma VM
 delete_snapshot() {
     # Deleta o snapshot especificado da VM
-    virsh --connect $SESSION snapshot-delete "$1" "$2"
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 create_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    nome_snapshot="$2"
+    virsh --connect $SESSION snapshot-delete "$nome_maquina" "$nome_snapshot"
+}
+
+# Função para restaurar um snapshot específico de uma VM
+restore_snapshot() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 restore_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    nome_snapshot="$2"
+    virsh --connect $SESSION snapshot-revert "$nome_maquina" "$nome_snapshot"
 }
 
 # Função para verificar e corrigir erros em um arquivo QCOW2
@@ -539,6 +565,7 @@ print_help() {
     echo "  list_snapshots <nome>     Lista os snapshots da VM"
     echo "  create_snapshot <nome> <snapshot> Cria um snapshot da VM"
     echo "  delete_snapshot <nome> <snapshot> Deleta um snapshot da VM"
+    echo "  restore_snapshot <nome> <snapshot> Restaura um snapshot da VM"
     echo "  check_qcow2 <arquivo> <opções> Verifica a integridade do disco no arquivo QCOW2"
     echo "  check_cpus <nome>         Verifica os CPUs da VM"
     echo "  check_interfaces <nome>   Verifica as interfaces da VM"
@@ -712,6 +739,9 @@ main() {
         ;;
     delete_snapshot)
         delete_snapshot "$2" "$3"
+        ;;
+    restore_snapshot)
+        restore_snapshot "$2" "$3"
         ;;
     check_qcow2)
         check_qcow2 "$@"
