@@ -311,7 +311,7 @@ cfdisk_qcow2() {
 # Função para listar os snapshots de uma VM
 list_snapshots() {
     # Lista todos os snapshots de uma VM
-    if [ -z "$1" ]; then
+    if [ $# -ne 2 ] || [ -z "$1" ] ; then
         echo "Uso: $0 list_snapshot NOME_DA_MAQUINA"
         exit 1
     fi
@@ -323,7 +323,7 @@ list_snapshots() {
 
 # Função para criar um snapshot de uma VM
 create_snapshot() {
-    if [ $# -ne 2 ]; then
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
         echo "Uso: $0 create_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
         exit 1
     fi
@@ -336,8 +336,8 @@ create_snapshot() {
 # Função para excluir um snapshot de uma VM
 delete_snapshot() {
     # Deleta o snapshot especificado da VM
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 create_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+        echo "Uso: $0 delete_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
         exit 1
     fi
 
@@ -348,7 +348,7 @@ delete_snapshot() {
 
 # Função para restaurar um snapshot específico de uma VM
 restore_snapshot() {
-    if [ $# -ne 2 ]; then
+    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
         echo "Uso: $0 restore_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
         exit 1
     fi
