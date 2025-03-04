@@ -269,6 +269,7 @@ show_qcow2_info() {
 
 # Função para redimensionar o disco de uma máquina virtual
 resize_vm_disk() {
+    export SESSION
     # Obtém o caminho do arquivo .qcow2 associado à VM
     local caminho_arquivo
     caminho_arquivo=$(virsh --connect $SESSION domblklist "$1" --details | awk '/disk/ {print $4}')
@@ -276,7 +277,7 @@ resize_vm_disk() {
     # Se o arquivo existir, redimensiona o disco
     if [ -f "$caminho_arquivo" ]; then
         qemu-img resize "$caminho_arquivo" +"$2"G
-        echo "Tamanho do disco aumentado em $2 GB."
+        echo "Tamanho do disco aumentado $2 GB."
     else
         echo "Arquivo .qcow2 não encontrado."
     fi
@@ -291,7 +292,7 @@ shrink_vm_disk() {
     # Se o arquivo existir, reduz o tamanho do disco
     if [ -f "$caminho_arquivo" ]; then
         qemu-img resize --shrink "$caminho_arquivo" -"$2"G
-        echo "Tamanho do disco diminuído em $2 GB."
+        echo "Tamanho do disco diminuído $2 GB."
     else
         echo "Arquivo .qcow2 não encontrado."
     fi
@@ -311,14 +312,13 @@ cfdisk_qcow2() {
 # Função para listar os snapshots de uma VM
 list_snapshots() {
     # Lista todos os snapshots de uma VM
-    if [ $# -ne 2 ] || [ -z "$1" ] ; then
-        echo "Uso: $0 list_snapshot NOME_DA_MAQUINA"
+    if [ $# -ne 1 ] || [ -z "$1" ] ; then
+        echo "Uso: $0 list_snapshots NOME_DA_MAQUINA"
         exit 1
     fi
 
     nome_maquina="$1"
     virsh --connect $SESSION snapshot-list "$nome_maquina"
-
 }
 
 # Função para criar um snapshot de uma VM
