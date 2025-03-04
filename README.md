@@ -71,6 +71,12 @@ virt-qmod stop minhaVM
 ```bash
 virt-qmod remove minhaVM
 ```
+___
+
+### Atualização
+
+- 04.03.2025 Criado Action Menu para o Dolphin para Criar e iniciar uma VM com mouse direto na ISO
+___
 
 ## Autor
 Desenvolvido por Marcelo (Elppans) <marcelo.el...@...>.
