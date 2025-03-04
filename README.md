@@ -71,6 +71,11 @@ virt-qmod stop minhaVM
 ```bash
 virt-qmod remove minhaVM
 ```
+
+### Abrir janela gráfica de uma VM
+```bash
+virt-qmod open minhaVM
+```
 ___
 
 ### Atualização
