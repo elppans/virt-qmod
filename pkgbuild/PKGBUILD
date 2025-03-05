@@ -3,7 +3,7 @@
 
 pkgname=virt-qmod
 pkgver=1.0.1
-pkgrel=2
+pkgrel=3
 arch=('any')
 license=('CUSTOM')
 depends=('pv' 'bc' 'qemu-base' 'virt-install' 'virt-viewer' 'bridge-utils')

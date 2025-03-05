@@ -40,7 +40,7 @@ DISK=20
 BOOT="uefi"
 NETWORK="bridge0"
 SOUND="ich6"
-GRAPHICS="--graphics spice,listen=0.0.0.0"
+GRAPHICS="spice,listen=0.0.0.0"
 DISK_FORMAT="qcow2"
 DISK_PATH="$HOME/VirtualMachines"
 OSTYPE="other"
@@ -616,7 +616,7 @@ create() {
         --os-variant="$OSVARIANT" \
         --noreboot \
         --noautoconsole \
-        $GRAPHICS
+        --graphics $GRAPHICS
 
 }
 
