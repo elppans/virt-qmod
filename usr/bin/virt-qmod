@@ -44,7 +44,7 @@ GRAPHICS="spice,listen=0.0.0.0"
 DISK_FORMAT="qcow2"
 DISK_PATH="$HOME/VirtualMachines"
 OSTYPE="other"
-OSVARIANT="unknown"
+OSVARIANT="generic"
 export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1
 EOF
 
