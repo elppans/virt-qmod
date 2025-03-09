@@ -6,6 +6,7 @@ VQCLI=$(basename "$0")
 
 # Arquivo de configuração do script
 CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
+CONFIG_GLOBAL="/opt/virt-qmod/virt-qmod.env"
 
 # Verifica se o script está sendo executado como sudo
 if [[ -n "$SUDO_USER" ]]; then
@@ -16,43 +17,75 @@ if [[ -n "$SUDO_USER" ]]; then
     # Atualizamos o caminho do arquivo de configuração para garantir que ele seja lido do usuário correto
     CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
 fi
-# echo  "$CONFIG_FILE"
 
 # Função para carregar ou criar o arquivo de configuração
 carregar_config() {
-    # Verifica se o arquivo de configuração já existe
+    # Verifica se o arquivo de configuração global existe
+    if [[ ! -f "$CONFIG_GLOBAL" ]]; then
+        echo "Erro: Arquivo de configuração global não encontrado em $CONFIG_GLOBAL."
+        exit 1
+    fi
+
+    # Carrega o arquivo de configuração global para obter as variáveis padrão
+    source "$CONFIG_GLOBAL"
+
+    # Verifica se o arquivo de configuração do usuário já existe
     if [[ -f "$CONFIG_FILE" ]]; then
-        # Se o arquivo existir, carrega as configurações
+        echo "Usando o arquivo de configuração existente em $CONFIG_FILE."
+
+        # Carrega o arquivo de configuração do usuário
         source "$CONFIG_FILE"
+
+        # Atualiza o arquivo do usuário com novas variáveis do global (sem sobrescrever)
+        while IFS= read -r linha; do
+            # Ignora linhas vazias e comentários
+            if [[ -z "$linha" || "$linha" =~ ^# ]]; then
+                continue
+            fi
+
+            # Extrai o nome da variável
+            var_name=$(echo "$linha" | cut -d '=' -f 1)
+
+            # Se a variável não estiver definida no arquivo do usuário, adiciona-a
+            if ! grep -q "^$var_name=" "$CONFIG_FILE"; then
+                echo "$linha" >> "$CONFIG_FILE"
+                echo "Adicionada nova variável ao arquivo do usuário: $var_name"
+            fi
+        done < "$CONFIG_GLOBAL"
     else
-        # Se o arquivo não existir, cria o diretório e o arquivo de configuração padrão
+        # Se o arquivo não existir, cria o diretório de configuração
         CONFIG_DIR="$(dirname "$CONFIG_FILE")"
         mkdir -p "$CONFIG_DIR"
-        
-        # Cria um arquivo de configuração padrão
-        cat <<EOF >"$CONFIG_FILE"
-# Arquivo de configuração para o script
-SESSION="qemu:///system"
-NAME="myvm"
-RAM=2048
-VCPUS=1
-DISK=20
-BOOT="uefi"
-NETWORK="bridge0"
-SOUND="ich6"
-GRAPHICS="spice,listen=0.0.0.0"
-DISK_FORMAT="qcow2"
-DISK_PATH="$HOME/VirtualMachines"
-OSTYPE="other"
-OSVARIANT="generic"
-export VIRTINSTALL_OSINFO_DISABLE_REQUIRE=1
-EOF
 
-        # Carrega o arquivo de configuração criado
-        source "$CONFIG_FILE"
+        # Copia o arquivo de configuração global para o diretório do usuário
+        cp "$CONFIG_GLOBAL" "$CONFIG_FILE"
+        echo "Arquivo de configuração copiado de $CONFIG_GLOBAL para $CONFIG_FILE."
     fi
-}
 
+    # Carrega o arquivo de configuração do usuário (atualizado)
+    source "$CONFIG_FILE"
+
+    # Valida o arquivo de configuração
+    if ! source "$CONFIG_FILE"; then
+        echo "Erro: O arquivo de configuração em $CONFIG_FILE contém erros."
+        exit 1
+    fi
+
+    # Verifica se as variáveis essenciais estão definidas
+    variaveis_essenciais=(
+        "SESSION" "NAME" "RAM" "MEMORYBACKING" "VCPUS" "DISK" "BOOT" 
+        "BOOTMENU" "NETWORK" "SOUND" "GRAPHICS" "DISK_FORMAT" "DISK_PATH" 
+        "OSTYPE" "OSVARIANT" "VIRTINSTALL_OSINFO_DISABLE_REQUIRE"
+    )
+    for var in "${variaveis_essenciais[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            echo "Erro: A variável '$var' não está definida no arquivo de configuração."
+            exit 1
+        fi
+    done
+
+    echo "Configurações carregadas com sucesso de $CONFIG_FILE."
+}
 
 # Função para verificar se o dono do arquivo é o mesmo usuário que está executando o script
 verificar_dono_arquivo() {
@@ -434,6 +467,42 @@ check_iso() {
     fi
 }
 
+# Função para ativar o Boot Menu de uma VM no libvirt/QEMU-KVM
+# - Verifica se a VM existe
+# - Checa se o Boot Menu já está ativado (se sim, não faz nada)
+# - Modifica a configuração XML da VM para ativar o Boot Menu, se necessário
+# - Aplica a nova configuração usando `virsh define`
+ativar_bootmenu() {
+    local VM_NAME="$1"
+
+    if [ -z "$VM_NAME" ]; then
+        echo "Uso: ativar_bootmenu <nome-da-vm>"
+        return 1
+    fi
+
+    # Verifica se a VM existe
+    if ! virsh list --all | grep -q " $VM_NAME "; then
+        echo "Erro: A VM '$VM_NAME' não foi encontrada."
+        return 1
+    fi
+
+    # Verifica se o Boot Menu já está ativado
+    if virsh dumpxml "$VM_NAME" | grep -q '<bootmenu enable="yes"/>'; then
+        echo "O Boot Menu já está ativado para a VM: $VM_NAME. Nenhuma alteração foi feita."
+        return 0
+    fi
+
+    # Aplica a modificação no XML da VM
+    virsh dumpxml "$VM_NAME" | sed 's|<os>|<os>\n    <bootmenu enable="yes"/>|' | virsh define /dev/stdin
+
+    if [ $? -eq 0 ]; then
+        echo "Boot Menu ativado com sucesso para a VM: $VM_NAME"
+    else
+        echo "Erro ao ativar o Boot Menu para a VM: $VM_NAME"
+        return 1
+    fi
+}
+
 # Função para montar uma ISO em uma máquina virtual
 # Função para montar a ISO em um dispositivo livre da máquina virtual
 attach_iso() {
@@ -466,6 +535,8 @@ attach_iso() {
         #virsh attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --mode readonly
         virsh --connect $SESSION change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
     fi
+
+    ativar_bootmenu "$nome_maquina"
 }
 
 # Função para garantir que a VM inicialize primeiro pelo CD-ROM antes do HD
@@ -616,7 +687,9 @@ create() {
         --os-variant="$OSVARIANT" \
         --noreboot \
         --noautoconsole \
-        --graphics $GRAPHICS
+        --graphics $GRAPHICS \
+        --boot menu=$BOOTMENU \
+        --memorybacking shared=$MEMORYBACKING
 
 }
 
@@ -802,6 +875,9 @@ main() {
         ;;
     esac
 }
+
+# Desativa a verificação de requisitos de sistema operacional
+export VIRTINSTALL_OSINFO_DISABLE_REQUIRE
 
 # Chama a função principal
 main "$@"
