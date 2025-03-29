@@ -481,19 +481,19 @@ ativar_bootmenu() {
     fi
 
     # Verifica se a VM existe
-    if ! virsh list --all | grep -q " $VM_NAME "; then
+    if ! virsh --connect $SESSION list --all | grep -q " $VM_NAME "; then
         echo "Erro: A VM '$VM_NAME' não foi encontrada."
         return 1
     fi
 
     # Verifica se o Boot Menu já está ativado
-    if virsh dumpxml "$VM_NAME" | grep -q '<bootmenu enable="yes"/>'; then
-        echo "O Boot Menu já está ativado para a VM: $VM_NAME. Nenhuma alteração foi feita."
+    if virsh --connect $SESSION dumpxml "$VM_NAME" | grep -q '<bootmenu enable="yes"/>'; then
+        echo "O Boot Menu está ativado para a VM: $VM_NAME."
         return 0
     fi
 
     # Aplica a modificação no XML da VM
-    virsh dumpxml "$VM_NAME" | sed 's|<os>|<os>\n    <bootmenu enable="yes"/>|' | virsh define /dev/stdin
+    virsh --connect $SESSION dumpxml "$VM_NAME" | sed 's|<os>|<os>\n    <bootmenu enable="yes"/>|' | virsh define /dev/stdin
 
     if [ $? -eq 0 ]; then
         echo "Boot Menu ativado com sucesso para a VM: $VM_NAME"
@@ -502,43 +502,6 @@ ativar_bootmenu() {
         return 1
     fi
 }
-
-# Função para montar uma ISO em uma máquina virtual
-# Função para montar a ISO em um dispositivo livre da máquina virtual
-attach_iso() {
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 attach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
-        exit 1
-    fi
-
-    nome_maquina="$1"
-    caminho_iso="$2"
-
-    # Verifica dispositivos livres
-    devices_livres=()
-    for device in hdb hdc hdd hde hdf; do
-        virsh --connect $SESSION domblkinfo "$nome_maquina" "$device" &>/dev/null
-        if [ $? -eq 1 ]; then
-            devices_livres+=("$device")
-        fi
-    done
-
-    if [ ${#devices_livres[@]} -eq 0 ]; then
-        novo_device="hdd"
-        echo "Não há dispositivos livres. Criando novo dispositivo: $novo_device"
-        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --type cdrom --mode readonly
-        virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --driver qemu --subdriver qcow2 --config --persistent
-
-    else
-        device_livre="${devices_livres[0]}"
-        echo "Adicionando ISO ao dispositivo livre: $device_livre"
-        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --mode readonly
-        virsh --connect $SESSION change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
-    fi
-
-    ativar_bootmenu "$nome_maquina"
-}
-
 # Função para garantir que a VM inicialize primeiro pelo CD-ROM antes do HD
 set_boot_cdrom() {
     # Parâmetro: Nome da máquina virtual
@@ -561,12 +524,49 @@ set_boot_cdrom() {
         echo "Alterando a ordem de boot da VM '$VM_NAME' para CD-ROM primeiro..."
 
         # Modifica a ordem de boot para colocar o CD-ROM antes do HD
-        virsh --connect $SESSION dumpxml "$VM_NAME" | \
-            sed 's|<boot dev=.*/>|<boot dev="cdrom"/>\n    <boot dev="hd"/>|' | \
-            virsh define /dev/stdin
+        # virsh --connect $SESSION dumpxml "$VM_NAME" | sed 's|<boot dev=.*/>|<boot dev="cdrom"/>\n    <boot dev="hd"/>|' | virsh define /dev/stdin
+        virsh dumpxml "$VM_NAME" | sed '/<boot dev="hd"\/>/a\    <boot dev="cdrom"\/>' | virsh define /dev/stdin
 
         echo "Ordem de boot atualizada para CD-ROM primeiro!"
     fi
+}
+# Função para montar uma ISO em uma máquina virtual
+# Função para montar a ISO em um dispositivo livre da máquina virtual
+attach_iso() {
+    if [ $# -ne 2 ]; then
+        echo "Uso: $0 attach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
+        exit 1
+    fi
+
+    nome_maquina="$1"
+    caminho_iso="$2"
+
+    # Verifica dispositivos livres
+    devices_livres=()
+    for device in hdb hdc hdd hde hdf; do
+        virsh --connect $SESSION domblkinfo "$nome_maquina" "$device" # &>/dev/null
+        if [ $? -eq 1 ]; then
+            devices_livres+=("$device")
+        fi
+    done
+
+    if [ ${#devices_livres[@]} -eq 0 ]; then
+        novo_device="hdd"
+        echo "Não há dispositivos livres. Criando novo dispositivo: $novo_device"
+        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --type cdrom --mode readonly
+        # virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --driver qemu --subdriver qcow2 --config --persistent
+        virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --driver qemu --subdriver qcow2 --config --persistent
+
+    else
+        device_livre="${devices_livres[0]}"
+        echo "Adicionando ISO ao dispositivo livre: $device_livre"
+        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --mode readonly
+        # virsh --connect $SESSION change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
+        virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --driver qemu --subdriver qcow2 --config --persistent
+    fi
+
+    ativar_bootmenu "$nome_maquina"
+    set_boot_cdrom "$nome_maquina"
 }
 
 # Função para desmontar o dispositivo de CD-ROM montado (EM EDIÇÃO)
@@ -674,22 +674,31 @@ create() {
         exit 1
     fi
 
-    # Executa o virt-install
+    # Cria o disco virtual
+    qemu-img --connect $SESSION create -f "$DISK_FORMAT" "$DISK_PATH/$NAME.qcow2" "$DISK"G &>>/dev/null
+
+    # Crie a definição da VM
     virt-install --connect $SESSION \
         --name "$NAME" \
         --ram "$RAM" \
         --vcpus "$VCPUS" \
         --boot "$BOOT" \
-        --disk "$DISK_PATH/$NAME.qcow2",size="$DISK",format="$DISK_FORMAT" \
-        --cdrom "$CDROM" \
+        --disk "$DISK_PATH/$NAME.qcow2",size="$DISK",bus=virtio \
         --network bridge="$NETWORK",model=virtio \
         --sound "$SOUND" \
         --os-variant="$OSVARIANT" \
         --noreboot \
         --noautoconsole \
-        --graphics $GRAPHICS \
-        --boot menu=$BOOTMENU \
-        --memorybacking shared=$MEMORYBACKING
+        --graphics ${GRAPHICS} \
+        --boot menu="$BOOTMENU" \
+        --memorybacking hugepages=$MEMORYBACKING \
+        --osinfo detect=on,require=off \
+        --import
+
+    # Inicie a VM no modo de instalação
+    sleep 5
+    attach_iso "$NAME" "$CDROM"
+    # start_vm
 
 }
 
