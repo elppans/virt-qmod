@@ -108,9 +108,6 @@ verificar_dono_arquivo() {
 
     # Compara o usuário atual com o dono do arquivo
     if [ ! "$usuario" == "$dono_arquivo" ]; then
-        # echo "O usuário '$usuario' é o dono do arquivo '$arquivo'."
-        # else
-        # echo "O usuário '$usuario' não é o dono do arquivo '$arquivo'. O dono é '$dono_arquivo'."
         echo "Alterando a propriedade do arquivo para o usuário '$usuario'..."
 
         # Altera o dono do arquivo para o usuário atual usando sudo
@@ -185,8 +182,6 @@ compress_only() {
             tamanho_arquivo=$(stat -c %s "$arquivo")
 
             # Comprime o arquivo .qcow2 utilizando qemu-img
-            # sleep 2
-            # sudo chmod 0666 "$arquivo"
             qemu-img convert -c -O qcow2 "$arquivo" "$arquivo_destino" | pv -s "$tamanho_arquivo" -petrb -N "Comprimindo $nome_arquivo"
 
             # Verifica se a compressão foi bem-sucedida
@@ -201,7 +196,6 @@ compress_only() {
                     echo "Arquivo $(basename "$arquivo_destino") está consistente."
                     # Substitui o arquivo original pelo comprimido
                     mv -f "$arquivo_destino" "$arquivo"
-                    # sudo chmod 0644 "$arquivo"
                     # Exibe a diferença de tamanho entre o arquivo original e o comprimido
                     local tamanho_atual
                     tamanho_atual=$(stat -c %s "$arquivo")
@@ -468,10 +462,6 @@ check_iso() {
 }
 
 # Função para ativar o Boot Menu de uma VM no libvirt/QEMU-KVM
-# - Verifica se a VM existe
-# - Checa se o Boot Menu já está ativado (se sim, não faz nada)
-# - Modifica a configuração XML da VM para ativar o Boot Menu, se necessário
-# - Aplica a nova configuração usando `virsh define`
 ativar_bootmenu() {
     local VM_NAME="$1"
 
@@ -524,13 +514,9 @@ set_boot_cdrom() {
         echo "Alterando a ordem de boot da VM '$VM_NAME' para CD-ROM primeiro..."
 
         # Modifica a ordem de boot para colocar o CD-ROM antes do HD
-        # virsh --connect $SESSION dumpxml "$VM_NAME" | sed 's|<boot dev=.*/>|<boot dev="cdrom"/>\n    <boot dev="hd"/>|' | virsh define /dev/stdin
         virsh dumpxml "$VM_NAME" | sed '/<boot dev="hd"\/>/a\    <boot dev="cdrom"\/>' | virsh define /dev/stdin
-
-        echo "Ordem de boot atualizada para CD-ROM primeiro!"
     fi
 }
-# Função para montar uma ISO em uma máquina virtual
 # Função para montar a ISO em um dispositivo livre da máquina virtual
 attach_iso() {
     if [ $# -ne 2 ]; then
@@ -544,7 +530,7 @@ attach_iso() {
     # Verifica dispositivos livres
     devices_livres=()
     for device in hdb hdc hdd hde hdf; do
-        virsh --connect $SESSION domblkinfo "$nome_maquina" "$device" # &>/dev/null
+        virsh --connect $SESSION domblkinfo "$nome_maquina" "$device" &>/dev/null
         if [ $? -eq 1 ]; then
             devices_livres+=("$device")
         fi
@@ -553,27 +539,18 @@ attach_iso() {
     if [ ${#devices_livres[@]} -eq 0 ]; then
         novo_device="hdd"
         echo "Não há dispositivos livres. Criando novo dispositivo: $novo_device"
-        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --type cdrom --mode readonly
-        # virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$novo_device" --driver qemu --subdriver qcow2 --config --persistent
         virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --driver qemu --subdriver qcow2 --config --persistent
 
     else
         device_livre="${devices_livres[0]}"
         echo "Adicionando ISO ao dispositivo livre: $device_livre"
-        #virsh attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --mode readonly
-        # virsh --connect $SESSION change-media "$nome_maquina" "$device_livre" --insert "$caminho_iso"
-        virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --driver qemu --subdriver qcow2 --config --persistent
+        virsh --connect $SESSION attach-disk "$nome_maquina" "$caminho_iso" --target "$device_livre" --driver qemu --type cdrom --mode readonly --config --persistent
     fi
-
-    ativar_bootmenu "$nome_maquina"
-    set_boot_cdrom "$nome_maquina"
 }
-
-# Função para desmontar o dispositivo de CD-ROM montado (EM EDIÇÃO)
-# Função para desmontar a ISO da máquina virtual
+# Função para desmontar o dispositivo de CD-ROM montado na máquina virtual (EM EDIÇÃO)
 detach_iso() {
     if [ $# -ne 2 ]; then
-        echo "Uso: $0 attach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
+        echo "Uso: $0 detach_iso NOME_DA_MAQUINA"
         exit 1
     fi
 
@@ -647,9 +624,7 @@ print_help() {
     echo "  detach_iso <nome> <iso>   Desanexa o ISO da VM"
     echo "  set_boot_cdrom <nome>     Define ordem de boot para inicializar primeiro pelo CD-ROM antes do HD"
 }
-
 # Função para criar a máquina virtual com os parâmetros definidos
-# Função para criar a VM
 create() {
     echo -e "
     Criando Máquina Virtual com as configurações a seguir:
@@ -666,7 +641,6 @@ create() {
     Gráficos: $GRAPHICS
     Variante: $OSVARIANT
     "
-    # exit
 
     # Verifica se todos os parâmetros necessários foram definidos
     if [[ -z $SESSION || -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$BOOT" || -z "$NETWORK" || -z "$GRAPHICS" || -z "$SOUND" ]]; then
@@ -690,13 +664,12 @@ create() {
         --noreboot \
         --noautoconsole \
         --graphics ${GRAPHICS} \
-        --boot menu="$BOOTMENU" \
+        --boot menu="$BOOTMENU",hd,cdrom \
         --memorybacking hugepages=$MEMORYBACKING \
         --osinfo detect=on,require=off \
         --import
 
     # Inicie a VM no modo de instalação
-    sleep 5
     attach_iso "$NAME" "$CDROM"
     # start_vm
 
@@ -760,7 +733,6 @@ process_args() {
         esac
     done
 }
-
 # Função principal
 main() {
     # Verifica os comandos necessários
@@ -859,7 +831,6 @@ main() {
     create)
         # Processa os argumentos
         process_args "$@"
-
         # Verifica se a variável CDROM foi preenchida
         # if [[ -z "$CDROM" ]]; then
         #     echo "Erro: O parâmetro --cdrom é obrigatório."
@@ -884,7 +855,6 @@ main() {
         ;;
     esac
 }
-
 # Desativa a verificação de requisitos de sistema operacional
 export VIRTINSTALL_OSINFO_DISABLE_REQUIRE
 
