@@ -41,7 +41,7 @@ package() {
 	local dirs=("usr" "opt")
 	for dir in "${dirs[@]}"; do
 		if [ -d "${srcdir}/${dir}" ]; then
-			install -Dm755 "${srcdir}/${dir}" "${pkgdir}/"
+			cp -af "${srcdir}/${dir}" "${pkgdir}/"
 		fi
 	done
 
