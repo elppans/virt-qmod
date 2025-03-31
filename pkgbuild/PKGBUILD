@@ -2,8 +2,8 @@
 # shellcheck disable=all
 
 pkgname=virt-qmod
-pkgver=1.0.2
-pkgrel=1
+pkgver=1.0.1
+pkgrel=4
 arch=('any')
 license=('CUSTOM')
 depends=('pv' 'bc' 'qemu-base' 'virt-install' 'virt-viewer' 'bridge-utils')
