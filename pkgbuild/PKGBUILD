@@ -58,16 +58,10 @@ package() {
 
 cat > "${pkgname}.install" <<EOF
 post_install() {
-	systemctl daemon-reload
-# Define os grupos aos quais o usuário deve ser adicionado
-libvirt_group=("kvm" "virtlogin" "libvirt" "libvirt-qemu")
+systemctl daemon-reload
 
-# Loop para verificar e adicionar o usuário em cada grupo
-for GROUP in "${libvirt_group[@]}"; do
-    if ! id -nG "$USER" | grep -qw "$GROUP"; then
-        sudo usermod -aG "$GROUP" "$USER"
-    fi
-done
+# Define os grupos aos quais o usuário deve ser adicionado
+sudo usermod -aG kvm,virtlogin,libvirt,libvirt-qemu "$USER"
 
 # Remove qualquer configuração existente do firewall_backend
 sed -i '/^firewall_backend/d' /etc/libvirt/network.conf
