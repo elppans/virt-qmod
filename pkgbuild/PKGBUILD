@@ -61,7 +61,7 @@ post_install() {
 systemctl daemon-reload
 
 # Define os grupos aos quais o usuário deve ser adicionado
-sudo usermod -aG kvm,virtlogin,libvirt,libvirt-qemu "$USER"
+usermod -aG kvm,virtlogin,libvirt,libvirt-qemu "$USER"
 
 # Remove qualquer configuração existente do firewall_backend
 sed -i '/^firewall_backend/d' /etc/libvirt/network.conf
@@ -71,10 +71,6 @@ echo 'firewall_backend = "iptables"' | tee -a /etc/libvirt/network.conf >> /dev/
 
 # Inicia o serviço libvirtd
 systemctl is-enabled libvirtd.service && systemctl restart libvirtd.service || systemctl enable --now libvirtd.service
-
-# Inicia e configura a rede NAT para iniciar de forma automatica
-# virsh net-start default
-virsh net-autostart default
 
 # Libera o uso de qualquer rede/bridge para o Virt Manager/QEMU (sem restringir a interfaces específicas)
 grep 'allow all' /etc/qemu/bridge.conf || echo 'allow all' | tee -a /etc/qemu/bridge.conf >> /dev/null
@@ -86,6 +82,9 @@ sysctl -w net.ipv4.ip_forward=1
 # Reinicia o serviço libvirtd para aplicar as mudanças
 systemctl restart libvirtd.service
 
+# Inicia e configura a rede NAT para iniciar de forma automatica
+virsh net-list --all | grep -qw default || virsh net-start default
+virsh net-autostart default
 	cat <<END
 
 O virt-qmod foi instalado com sucesso...
