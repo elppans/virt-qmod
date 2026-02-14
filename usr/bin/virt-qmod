@@ -220,11 +220,11 @@ list_vms() {
     case "$TIPO" in
         "ativos"|"running")
             # echo "Listando apenas VMs LIGADAS:"
-            virsh --connect "$SESSION" list --state-running
+            virsh --connect "$SESSION" list --state-running --name
             ;;
         "inativos"|"shutoff")
             # echo "Listando apenas VMs DESLIGADAS:"
-            virsh --connect "$SESSION" list --inactive
+            virsh --connect "$SESSION" list --inactive --name
             ;;
         "todas"|"all")
             # echo "Listando TODAS as VMs:"
