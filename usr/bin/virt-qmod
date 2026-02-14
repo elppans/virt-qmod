@@ -215,8 +215,30 @@ compress_only() {
 
 # Função para listar todas as máquinas virtuais
 list_vms() {
-    # Exibe todas as VMs (ativas e inativas)
-    virsh --connect "$SESSION" list --all
+    local TIPO="${1:-todas}"  # Se não passar nada, assume "todas"
+
+    case "$TIPO" in
+        "ativos"|"running")
+            echo "Listando apenas VMs LIGADAS:"
+            virsh --connect "$SESSION" list --state-running
+            ;;
+        "inativos"|"shutoff")
+            echo "Listando apenas VMs DESLIGADAS:"
+            virsh --connect "$SESSION" list --inactive
+            ;;
+        "todas"|"all")
+            echo "Listando TODAS as VMs:"
+            virsh --connect "$SESSION" list --all
+            ;;
+        "nomes")
+            # Útil para usar em loops de outros scripts
+            virsh --connect "$SESSION" list --all --name
+            ;;
+        *)
+            echo "Uso: list_vms [ativos|inativos|todas|nomes]"
+            return 1
+            ;;
+    esac
 }
 
 # Função para Abrir o Virt Viewer para mostrar a tela da VM especificada
@@ -763,7 +785,7 @@ main() {
         compress_only
         ;;
     list)
-        list_vms
+        list_vms "$2"
         ;;
     list_variant)
         osinfo-query os --fields=id,name,version --sort=name
