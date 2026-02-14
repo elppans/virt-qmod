@@ -291,8 +291,19 @@ remove_vm() {
 
 # Função para exibir informações sobre o disco de uma máquina virtual
 show_vm_disk_info() {
-    # Exibe as informações do disco da VM especificada
-    virsh --connect "$SESSION" domblkinfo "$1" --human "${2:--all}"
+    # 1. Verifica se o nome da VM foi passado
+    if [ -z "$1" ]; then
+        echo "Erro: Nome da VM não especificado."
+        return 1
+    fi
+
+    local VM_NAME="$1"
+
+    # 2. Comando blindado:
+    # --domain: Garante que o virsh saiba quem é a VM
+    # --all: Lista todos os discos (essencial para snapshots externos)
+    # --human: Formata tamanhos para G, M ou K (melhor para o YAD)
+    virsh --connect "$SESSION" domblkinfo --domain "$VM_NAME" --all --human
 }
 
 # Função para exibir informações do arquivo .qcow2 usando fdisk -l
