@@ -390,22 +390,36 @@ create_snapshot() {
         exit 1
     fi
 
-    nome_maquina="$1"
-    nome_snapshot="$2"
-    virsh --connect "$SESSION" snapshot-create-as "$nome_maquina" "$nome_snapshot" "Snapshot criado através do script"
+    local nome_maquina="$1"
+    local nome_snapshot="$2"
+    local descricao="Snapshot externo criado através do script"
+
+    # Usando --disk-only para evitar o erro de pflash/NVRAM
+    # Usando --atomic para garantir que ou cria tudo ou nada (segurança)
+    virsh --connect "$SESSION" snapshot-create-as \
+        --domain "$nome_maquina" \
+        --name "$nome_snapshot" \
+        --description "$descricao" \
+        --disk-only \
+        --atomic
 }
 
 # Função para excluir um snapshot de uma VM
 delete_snapshot() {
-    # Deleta o snapshot especificado da VM
     if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
         echo "Uso: $0 delete_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
         exit 1
     fi
 
-    nome_maquina="$1"
-    nome_snapshot="$2"
-    virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot"
+    local nome_maquina="$1"
+    local nome_snapshot="$2"
+
+    echo "Removendo snapshot externo: $nome_snapshot..."
+    
+    # Para snapshots externos, usamos --metadata para remover a referência.
+    # Nota: Isso não deleta o arquivo .qcow2 criado, apenas a referência no virsh.
+    # Se quiser deletar o arquivo e os dados dele, usa-se --children ou blockcommit.
+    virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata
 }
 
 # Função para restaurar um snapshot específico de uma VM
@@ -415,9 +429,19 @@ restore_snapshot() {
         exit 1
     fi
 
-    nome_maquina="$1"
-    nome_snapshot="$2"
-    virsh --connect "$SESSION" snapshot-revert "$nome_maquina" "$nome_snapshot"
+    local nome_maquina="$1"
+    local nome_snapshot="$2"
+
+    # Segurança: Verifica se a VM está ligada
+    if virsh --connect "$SESSION" dominfo "$nome_maquina" | grep -q "running"; then
+        echo "Erro: A VM deve estar DESLIGADA para restaurar um snapshot externo."
+        return 1
+    fi
+
+    echo "Restaurando snapshot: $nome_snapshot..."
+    
+    # Flag --force é frequentemente necessária para snapshots externos
+    virsh --connect "$SESSION" snapshot-revert "$nome_maquina" "$nome_snapshot" --force
 }
 
 # Função para verificar e corrigir erros em um arquivo QCOW2
