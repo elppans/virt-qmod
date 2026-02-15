@@ -360,7 +360,7 @@ resize_vm_disk() {
     estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep "Estado" | cut -d: -f2 | xargs)
 
     if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
-        if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size "${aumento}G" > /dev/null 2>&1; then
+        if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size +"${aumento}G" > /dev/null 2>&1; then
             operacao_sucesso=true
         fi
     else
