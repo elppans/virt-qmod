@@ -342,17 +342,46 @@ show_qcow2_info() {
 
 # Função para redimensionar o disco de uma máquina virtual
 resize_vm_disk() {
-    export SESSION
-    # Obtém o caminho do arquivo .qcow2 associado à VM
-    local caminho_arquivo
-    caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$1" --details | awk '/disk/ {print $4}')
+    local vm="$1"
+    local aumento="$2"
+    local operacao_sucesso=false
+    local detalhes disco_alvo caminho_arquivo antes depois estado_vm
 
-    # Se o arquivo existir, redimensiona o disco
-    if [ -f "$caminho_arquivo" ]; then
-        qemu-img resize "$caminho_arquivo" +"$2"G
-        echo "Tamanho do disco aumentado $2 GB."
+    # Coleta de dados (sempre silenciosa)
+    detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
+    disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
+    caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
+
+    get_size() {
+        virsh --connect "$SESSION" domblkinfo "$1" "$2" --human | grep -iE "Capac|Capacit" | awk '{print $2}' | tr -d '[:space:]'
+    }
+
+    antes=$(get_size "$vm" "$disco_alvo")
+    estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep "Estado" | cut -d: -f2 | xargs)
+
+    if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
+        if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size "${aumento}G" > /dev/null 2>&1; then
+            operacao_sucesso=true
+        fi
     else
-        echo "Arquivo .qcow2 não encontrado."
+        # Tenta qemu-img (funciona no Manjaro sem snapshot)
+        if qemu-img resize "$caminho_arquivo" +"${aumento}G" > /dev/null 2>&1; then
+            operacao_sucesso=true
+        else
+            echo "ERRO: O redimensionamento offline falhou."
+            echo "DICA: VMs com snapshots externos devem estar LIGADAS."
+            return 1
+        fi
+    fi
+
+    if [[ "$operacao_sucesso" == "true" ]]; then
+        depois=$(get_size "$vm" "$disco_alvo")
+        echo "VM: $vm"
+        echo "ESTADO: $estado_vm"
+        echo "---"
+        echo "ANTES: $antes"
+        echo "AUMENTO: +$aumento GB"
+        echo "TOTAL: $depois"
     fi
 }
 
