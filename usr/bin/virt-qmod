@@ -345,58 +345,131 @@ resize_vm_disk() {
     local vm="$1"
     local aumento="$2"
     local operacao_sucesso=false
-    local detalhes disco_alvo caminho_arquivo antes depois estado_vm
+    local detalhes disco_alvo caminho_arquivo antes_human antes_gb depois_human estado_vm
 
-    # Coleta de dados (sempre silenciosa)
+    # 1. Coleta dados
     detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
     disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
     caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
-
-    get_size() {
-        virsh --connect "$SESSION" domblkinfo "$1" "$2" --human | grep -iE "Capac|Capacit" | awk '{print $2}' | tr -d '[:space:]'
-    }
-
-    antes=$(get_size "$vm" "$disco_alvo")
     estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep "Estado" | cut -d: -f2 | xargs)
 
+    # 2. Pega o tamanho atual apenas em NÚMERO (remove vírgulas e letras)
+    # Precisamos disso para somar matematicamente no script
+    antes_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
+    antes_gb=$(echo "$antes_human" | sed 's/,/./' | sed 's/[^0-9.]//g' | awk '{print int($1)}')
+
+    # 3. Calcula o NOVO TOTAL (Ex: 25 + 5 = 30)
+    local novo_total
+    novo_total=$((antes_gb + aumento))
+
+    # 4. Executa o comando usando o VALOR ABSOLUTO
     if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
-        if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size +"${aumento}G" > /dev/null 2>&1; then
+        # Online: Tentamos sem o sinal de +, passando o novo total acumulado
+        if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size "${novo_total}G" > /dev/null 2>&1; then
             operacao_sucesso=true
         fi
     else
-        # Tenta qemu-img (funciona no Manjaro sem snapshot)
-        if qemu-img resize "$caminho_arquivo" +"${aumento}G" > /dev/null 2>&1; then
+        # Offline: qemu-img com valor absoluto (sem o sinal de + no comando)
+        if qemu-img resize "$caminho_arquivo" "${novo_total}G" > /dev/null 2>&1; then
             operacao_sucesso=true
-        else
-            echo "ERRO: O redimensionamento offline falhou."
-            echo "DICA: VMs com snapshots externos devem estar LIGADAS."
-            return 1
         fi
     fi
 
+    # 5. Relatório
     if [[ "$operacao_sucesso" == "true" ]]; then
-        depois=$(get_size "$vm" "$disco_alvo")
+        depois_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
         echo "VM: $vm"
         echo "ESTADO: $estado_vm"
         echo "---"
-        echo "ANTES: $antes"
-        echo "AUMENTO: +$aumento GB"
-        echo "TOTAL: $depois"
+        echo "ANTES: $antes_human"
+        echo "AUMENTADO: +$aumento GB"
+        echo "TOTAL ATUALIZADO: $depois_human"
+    else
+        echo "ERRO: O sistema recusou o redimensionamento para ${novo_total}G."
+        return 1
     fi
 }
 
 # Função para reduzir o tamanho do disco de uma máquina virtual
 shrink_vm_disk() {
-    # Obtém o caminho do arquivo .qcow2 associado à VM
-    local caminho_arquivo
-    caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$1" --details | awk '/disk/ {print $4}')
+    local vm="$1"
+    local reducao="$2"
+    local operacao_sucesso=false
+    local detalhes disco_alvo caminho_arquivo antes_human antes_gb estado_vm
 
-    # Se o arquivo existir, reduz o tamanho do disco
-    if [ -f "$caminho_arquivo" ]; then
-        qemu-img resize --shrink "$caminho_arquivo" -"$2"G
-        echo "Tamanho do disco diminuído $2 GB."
+    # 1. Coleta dados básicos
+    detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
+    disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
+    caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
+    estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep "Estado" | cut -d: -f2 | xargs)
+
+    # 2. Detecta se é um snapshot externo (contém "-snap-" no nome do arquivo)
+    if [[ "$caminho_arquivo" == *"-snap-"* ]]; then
+        echo "Detectada cadeia de snapshot ativo. Iniciando unificação (Merge)..."
+        
+        if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
+            # OPÇÃO 1: Online (Blockcommit)
+            echo "VM Ligada: Executando blockcommit ativo..."
+            if virsh --connect "$SESSION" blockcommit "$vm" "$disco_alvo" --active --pivot --verbose; then
+                # Atualiza o caminho do arquivo após o pivot para o original
+                caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/ {print $4}' | head -n1)
+            else
+                echo "ERRO: Falha no blockcommit online." && return 1
+            fi
+else
+            # OPÇÃO 2: Offline (Merge + Troca de Arquivo + Limpeza)
+            echo "VM Desligada: Mesclando arquivo delta no arquivo base..."
+            
+            # 1. Guardamos o caminho do "lixo" antes de perdermos a referência
+            local arquivo_para_remover="$caminho_arquivo"
+
+            if qemu-img commit "$arquivo_para_remover"; then
+                # 2. Pega o arquivo pai (Backing File)
+                local backing_file
+                backing_file=$(qemu-img info "$arquivo_para_remover" | grep "backing file:" | cut -d: -f2- | xargs)
+                
+                if [ -n "$backing_file" ]; then
+                    echo "Atualizando configuração da VM para usar: $(basename "$backing_file")"
+                    
+                    # 3. Troca o disco no XML (usando virsh sem sudo devido às ACLs)
+                    virsh --connect "$SESSION" detach-disk "$vm" "$disco_alvo" --config > /dev/null
+                    virsh --connect "$SESSION" attach-disk "$vm" "$backing_file" "$disco_alvo" --config --subdriver qcow2 > /dev/null
+                    
+                    # 4. A LIMPEZA: Agora que a VM não usa mais o arquivo e os dados foram salvos
+                    echo "Removendo arquivo órfão: $(basename "$arquivo_para_remover")"
+                    rm -f "$arquivo_para_remover"
+                    
+                    # Atualiza a variável para o shrink rodar no arquivo correto (o pai)
+                    caminho_arquivo="$backing_file"
+                fi
+            else
+                echo "ERRO: Falha ao mesclar arquivos offline." && return 1
+            fi
+        fi
+    fi
+
+    # 3. Agora que o disco está unificado e limpo, fazemos o SHRINK
+    # Pega o tamanho atual (agora da base limpa)
+    antes_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
+    antes_gb=$(echo "$antes_human" | sed 's/,/./' | sed 's/[^0-9.]//g' | awk '{print int($1)}')
+    local novo_total=$((antes_gb - reducao))
+
+    # Só executa o shrink se a VM estiver desligada (exigência do qemu-img)
+    # Se estava ligada para o commit, precisamos avisar ou desligar.
+    estado_atualizado=$(virsh --connect "$SESSION" dominfo "$vm" | grep "Estado" | cut -d: -f2 | xargs)
+    if [[ "$estado_atualizado" == "executando" ]]; then
+        echo "Merge concluído. Por favor, DESLIGUE a VM para aplicar a redução física do disco."
+        return 0
+    fi
+
+    echo "Executando redução física para ${novo_total}G..."
+    if qemu-img resize --shrink "$caminho_arquivo" "${novo_total}G"; then
+        echo "VM: $vm"
+        echo "ANTES: $antes_human"
+        echo "REDUZIDO: -$reducao GB"
+        echo "TOTAL: ${novo_total} GB"
     else
-        echo "Arquivo .qcow2 não encontrado."
+        echo "ERRO: Falha final no qemu-img resize."
     fi
 }
 
