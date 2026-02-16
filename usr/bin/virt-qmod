@@ -10,793 +10,1054 @@ CONFIG_GLOBAL="/opt/virt-qmod/virt-qmod.env"
 
 # Verifica se o script está sendo executado como sudo
 if [[ -n "$SUDO_USER" ]]; then
-    # Se estiver rodando com sudo, redefinimos HOME para o diretório do usuário original
-    # `eval echo ~$SUDO_USER` retorna o home do usuário que chamou o sudo
-    HOME=$(eval echo ~"$SUDO_USER")
-    
-    # Atualizamos o caminho do arquivo de configuração para garantir que ele seja lido do usuário correto
-    CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
+	# Se estiver rodando com sudo, redefinimos HOME para o diretório do usuário original
+	# `eval echo ~$SUDO_USER` retorna o home do usuário que chamou o sudo
+	HOME=$(eval echo ~"$SUDO_USER")
+
+	# Atualizamos o caminho do arquivo de configuração para garantir que ele seja lido do usuário correto
+	CONFIG_FILE="$HOME/.config/virt-qmod/virt-qmod.env"
 fi
 
 # Função para carregar ou criar o arquivo de configuração
 carregar_config() {
-    # Verifica se o arquivo de configuração global existe
-    if [[ ! -f "$CONFIG_GLOBAL" ]]; then
-        echo "Erro: Arquivo de configuração global não encontrado em $CONFIG_GLOBAL."
-        exit 1
-    fi
+	# Verifica se o arquivo de configuração global existe
+	if [[ ! -f "$CONFIG_GLOBAL" ]]; then
+		echo "Erro: Arquivo de configuração global não encontrado em $CONFIG_GLOBAL."
+		exit 1
+	fi
 
-    # Carrega o arquivo de configuração global para obter as variáveis padrão
-    source "$CONFIG_GLOBAL"
+	# Carrega o arquivo de configuração global para obter as variáveis padrão
+	source "$CONFIG_GLOBAL"
 
-    # Verifica se o arquivo de configuração do usuário já existe
-    if [[ -f "$CONFIG_FILE" ]]; then
-        echo "Usando o arquivo de configuração existente em $CONFIG_FILE."
+	# Verifica se o arquivo de configuração do usuário já existe
+	if [[ -f "$CONFIG_FILE" ]]; then
+		echo "Usando o arquivo de configuração existente em $CONFIG_FILE."
 
-        # Carrega o arquivo de configuração do usuário
-        source "$CONFIG_FILE"
+		# Carrega o arquivo de configuração do usuário
+		source "$CONFIG_FILE"
 
-        # Atualiza o arquivo do usuário com novas variáveis do global (sem sobrescrever)
-        while IFS= read -r linha; do
-            # Ignora linhas vazias e comentários
-            if [[ -z "$linha" || "$linha" =~ ^# ]]; then
-                continue
-            fi
+		# Atualiza o arquivo do usuário com novas variáveis do global (sem sobrescrever)
+		while IFS= read -r linha; do
+			# Ignora linhas vazias e comentários
+			if [[ -z "$linha" || "$linha" =~ ^# ]]; then
+				continue
+			fi
 
-            # Extrai o nome da variável
-            var_name=$(echo "$linha" | cut -d '=' -f 1)
+			# Extrai o nome da variável
+			var_name=$(echo "$linha" | cut -d '=' -f 1)
 
-            # Se a variável não estiver definida no arquivo do usuário, adiciona-a
-            if ! grep -q "^$var_name=" "$CONFIG_FILE"; then
-                echo "$linha" >> "$CONFIG_FILE"
-                echo "Adicionada nova variável ao arquivo do usuário: $var_name"
-            fi
-        done < "$CONFIG_GLOBAL"
-    else
-        # Se o arquivo não existir, cria o diretório de configuração
-        CONFIG_DIR="$(dirname "$CONFIG_FILE")"
-        mkdir -p "$CONFIG_DIR"
+			# Se a variável não estiver definida no arquivo do usuário, adiciona-a
+			if ! grep -q "^$var_name=" "$CONFIG_FILE"; then
+				echo "$linha" >>"$CONFIG_FILE"
+				echo "Adicionada nova variável ao arquivo do usuário: $var_name"
+			fi
+		done <"$CONFIG_GLOBAL"
+	else
+		# Se o arquivo não existir, cria o diretório de configuração
+		CONFIG_DIR="$(dirname "$CONFIG_FILE")"
+		mkdir -p "$CONFIG_DIR"
 
-        # Copia o arquivo de configuração global para o diretório do usuário
-        cp "$CONFIG_GLOBAL" "$CONFIG_FILE"
-        echo "Arquivo de configuração copiado de $CONFIG_GLOBAL para $CONFIG_FILE."
-    fi
+		# Copia o arquivo de configuração global para o diretório do usuário
+		cp "$CONFIG_GLOBAL" "$CONFIG_FILE"
+		echo "Arquivo de configuração copiado de $CONFIG_GLOBAL para $CONFIG_FILE."
+	fi
 
-    # Carrega o arquivo de configuração do usuário (atualizado)
-    source "$CONFIG_FILE"
+	# Carrega o arquivo de configuração do usuário (atualizado)
+	source "$CONFIG_FILE"
 
-    # Valida o arquivo de configuração
-    if ! source "$CONFIG_FILE"; then
-        echo "Erro: O arquivo de configuração em $CONFIG_FILE contém erros."
-        exit 1
-    fi
+	# Valida o arquivo de configuração
+	if ! source "$CONFIG_FILE"; then
+		echo "Erro: O arquivo de configuração em $CONFIG_FILE contém erros."
+		exit 1
+	fi
 
-    # Verifica se as variáveis essenciais estão definidas
-    variaveis_essenciais=(
-        "SESSION" "NAME" "RAM" "MEMORYBACKING" "VCPUS" "DISK" "BOOT" 
-        "BOOTMENU" "NETWORK" "SOUND" "GRAPHICS" "DISK_FORMAT" "DISK_PATH" 
-        "OSTYPE" "OSVARIANT" "VIRTINSTALL_OSINFO_DISABLE_REQUIRE"
-    )
-    for var in "${variaveis_essenciais[@]}"; do
-        if [[ -z "${!var}" ]]; then
-            echo "Erro: A variável '$var' não está definida no arquivo de configuração."
-            exit 1
-        fi
-    done
+	# Verifica se as variáveis essenciais estão definidas
+	variaveis_essenciais=(
+		"SESSION" "NAME" "RAM" "MEMORYBACKING" "VCPUS" "DISK" "BOOT"
+		"BOOTMENU" "NETWORK" "SOUND" "GRAPHICS" "DISK_FORMAT" "DISK_PATH"
+		"OSTYPE" "OSVARIANT" "VIRTINSTALL_OSINFO_DISABLE_REQUIRE"
+	)
+	for var in "${variaveis_essenciais[@]}"; do
+		if [[ -z "${!var}" ]]; then
+			echo "Erro: A variável '$var' não está definida no arquivo de configuração."
+			exit 1
+		fi
+	done
 
-    echo "Configurações carregadas com sucesso de $CONFIG_FILE."
+	echo "Configurações carregadas com sucesso de $CONFIG_FILE."
 }
 
 # Função para verificar se o dono do arquivo é o mesmo usuário que está executando o script
 verificar_dono_arquivo() {
-    # Recebe o caminho do arquivo como argumento
-    local arquivo="$1"
+	# Recebe o caminho do arquivo como argumento
+	local arquivo="$1"
 
-    # Verifica se o arquivo existe
-    if [ ! -e "$arquivo" ]; then
-        echo "Erro: O arquivo '$arquivo' não existe."
-        return 1
-    fi
+	# Verifica se o arquivo existe
+	if [ ! -e "$arquivo" ]; then
+		echo "Erro: O arquivo '$arquivo' não existe."
+		return 1
+	fi
 
-    # Obtém o nome do usuário atual (quem está executando o script)
-    local usuario
-    usuario=$(whoami)
+	# Obtém o nome do usuário atual (quem está executando o script)
+	local usuario
+	usuario=$(whoami)
 
-    # Obtém o nome do usuário que é o dono do arquivo
-    local dono_arquivo
-    dono_arquivo=$(stat -c %U "$arquivo")
+	# Obtém o nome do usuário que é o dono do arquivo
+	local dono_arquivo
+	dono_arquivo=$(stat -c %U "$arquivo")
 
-    # Compara o usuário atual com o dono do arquivo
-    if [ ! "$usuario" == "$dono_arquivo" ]; then
-        echo "Alterando a propriedade do arquivo para o usuário '$usuario'..."
+	# Compara o usuário atual com o dono do arquivo
+	if [ ! "$usuario" == "$dono_arquivo" ]; then
+		echo "Alterando a propriedade do arquivo para o usuário '$usuario'..."
 
-        # Altera o dono do arquivo para o usuário atual usando sudo
+		# Altera o dono do arquivo para o usuário atual usando sudo
 		if sudo chown "$usuario:$usuario" "$arquivo"; then
-    		echo "Propriedade do arquivo '$arquivo' foi alterada com sucesso para '$usuario'."
+			echo "Propriedade do arquivo '$arquivo' foi alterada com sucesso para '$usuario'."
 		else
-    		echo "Erro ao alterar a propriedade do arquivo '$arquivo'."
+			echo "Erro ao alterar a propriedade do arquivo '$arquivo'."
 		fi
-    fi
+	fi
 }
 
 # Função para verificar se os comandos necessários estão instalados
 verificar_comandos() {
-    # Lista de comandos obrigatórios
-    for cmd in pv bc virt-viewer qemu-img virsh virt-install; do
-        # Verifica se o comando está disponível no sistema
-        if ! command -v "$cmd" >/dev/null; then
-            # Caso algum comando não esteja presente, exibe uma mensagem e sai
-            echo "O utilitário $cmd não está instalado. Instale-o para usar este script."
-            exit 1
-        fi
-    done
+	# Lista de comandos obrigatórios
+	for cmd in pv bc virt-viewer qemu-img virsh virt-install; do
+		# Verifica se o comando está disponível no sistema
+		if ! command -v "$cmd" >/dev/null; then
+			# Caso algum comando não esteja presente, exibe uma mensagem e sai
+			echo "O utilitário $cmd não está instalado. Instale-o para usar este script."
+			exit 1
+		fi
+	done
 }
 
 # Função para mostrar o tamanho de um arquivo
 mostrar_tamanho() {
-    tamanho=$(du -h "$1" | awk '{print $1}')
-    echo "Tamanho do arquivo $(basename "$1"): $tamanho"
+	tamanho=$(du -h "$1" | awk '{print $1}')
+	echo "Tamanho do arquivo $(basename "$1"): $tamanho"
 }
 
 # Converte bytes para MB ou GB
 converter_para_humanos() {
-    local tamanho=$1
-    if [ "$tamanho" -ge 1000000000 ]; then
-        echo "$(bc -l <<<"$tamanho / 1000000000") GB"
-    elif [ "$tamanho" -ge 1000000 ]; then
-        echo "$(bc -l <<<"$tamanho / 1000000") MB"
-    else
-        echo "$tamanho bytes"
-    fi
+	local tamanho=$1
+	if [ "$tamanho" -ge 1000000000 ]; then
+		echo "$(bc -l <<<"$tamanho / 1000000000") GB"
+	elif [ "$tamanho" -ge 1000000 ]; then
+		echo "$(bc -l <<<"$tamanho / 1000000") MB"
+	else
+		echo "$tamanho bytes"
+	fi
 }
 
 # Função para comprimir arquivos .qcow2
 compress_only() {
-    echo "Iniciando a compressão inteligente de discos via virsh..."
+	echo "Iniciando a compressão inteligente de discos via virsh..."
 
-    # Pegamos a lista de todas as VMs
-    local VMS
-    VMS=$(virsh --connect "$SESSION" list --all --name)
+	# Pegamos a lista de todas as VMs
+	local VMS
+	VMS=$(virsh --connect "$SESSION" list --all --name)
 
-    for VM_NAME in $VMS; do
-        [ -z "$VM_NAME" ] && continue
+	for VM_NAME in $VMS; do
+		[ -z "$VM_NAME" ] && continue
 
-        # 1. Descobrimos o arquivo de disco da VM
-        local ARQUIVO
-        ARQUIVO=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | awk '$2=="disk" {print $4; exit}')
+		# 1. Descobrimos o arquivo de disco da VM
+		local ARQUIVO
+		ARQUIVO=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | awk '$2=="disk" {print $4; exit}')
 
-        # Pula se não encontrar arquivo ou se não for um arquivo real
-        if [ -z "$ARQUIVO" ] || [ ! -f "$ARQUIVO" ]; then
-            continue
-        fi
+		# Pula se não encontrar arquivo ou se não for um arquivo real
+		if [ -z "$ARQUIVO" ] || [ ! -f "$ARQUIVO" ]; then
+			continue
+		fi
 
-        echo "---------------------------------------------------"
-        echo "VM: $VM_NAME | Arquivo: $(basename "$ARQUIVO")"
+		echo "---------------------------------------------------"
+		echo "VM: $VM_NAME | Arquivo: $(basename "$ARQUIVO")"
 
-        # 2. SEGURANÇA: Verifica se a VM está ligada
-        if virsh --connect "$SESSION" dominfo "$VM_NAME" | grep -q "running"; then
-            echo "Aviso: Ignorando '$VM_NAME' pois a VM está LIGADA."
-            continue
-        fi
+		# 2. SEGURANÇA: Verifica se a VM está ligada
+		if virsh --connect "$SESSION" dominfo "$VM_NAME" | grep -q "running"; then
+			echo "Aviso: Ignorando '$VM_NAME' pois a VM está LIGADA."
+			continue
+		fi
 
-        # 3. Preparação para compressão
-        verificar_dono_arquivo "$ARQUIVO"
-        
-        local TAMANHO_ANTERIOR
-        TAMANHO_ANTERIOR=$(stat -c %s "$ARQUIVO")
-        
-        local ARQUIVO_DESTINO="${ARQUIVO}.tmp"
+		# 3. Preparação para compressão
+		verificar_dono_arquivo "$ARQUIVO"
 
-        # 4. Execução da Compressão
-        if qemu-img convert -O qcow2 -c "$ARQUIVO" "$ARQUIVO_DESTINO"; then
-            
-            # 5. Check de consistência
-            if qemu-img check "$ARQUIVO_DESTINO" > /dev/null 2>&1; then
-                mv -f "$ARQUIVO_DESTINO" "$ARQUIVO"
-                
-                local TAMANHO_ATUAL
-                TAMANHO_ATUAL=$(stat -c %s "$ARQUIVO")
-                local DIFERENCA=$((TAMANHO_ANTERIOR - TAMANHO_ATUAL))
-                
-                echo "Sucesso! Economia de: $(converter_para_humanos "$DIFERENCA")"
-            else
-                echo "Erro: Falha na consistência do arquivo comprimido. Abortando troca."
-                rm -f "$ARQUIVO_DESTINO"
-            fi
-        else
-            echo "Erro ao comprimir o disco da VM $VM_NAME."
-            rm -f "$ARQUIVO_DESTINO"
-        fi
-    done
+		local TAMANHO_ANTERIOR
+		TAMANHO_ANTERIOR=$(stat -c %s "$ARQUIVO")
 
-    echo "---------------------------------------------------"
-    echo "Processo de compressão finalizado."
+		local ARQUIVO_DESTINO="${ARQUIVO}.tmp"
+
+		# 4. Execução da Compressão
+		if qemu-img convert -O qcow2 -c "$ARQUIVO" "$ARQUIVO_DESTINO"; then
+
+			# 5. Check de consistência
+			if qemu-img check "$ARQUIVO_DESTINO" >/dev/null 2>&1; then
+				mv -f "$ARQUIVO_DESTINO" "$ARQUIVO"
+
+				local TAMANHO_ATUAL
+				TAMANHO_ATUAL=$(stat -c %s "$ARQUIVO")
+				local DIFERENCA=$((TAMANHO_ANTERIOR - TAMANHO_ATUAL))
+
+				echo "Sucesso! Economia de: $(converter_para_humanos "$DIFERENCA")"
+			else
+				echo "Erro: Falha na consistência do arquivo comprimido. Abortando troca."
+				rm -f "$ARQUIVO_DESTINO"
+			fi
+		else
+			echo "Erro ao comprimir o disco da VM $VM_NAME."
+			rm -f "$ARQUIVO_DESTINO"
+		fi
+	done
+
+	echo "---------------------------------------------------"
+	echo "Processo de compressão finalizado."
 }
 
 # Função para listar todas as máquinas virtuais
 list_vms() {
-    local TIPO="${1:-todas}"  # Se não passar nada, assume "todas"
+	local TIPO="${1:-todas}" # Se não passar nada, assume "todas"
 
-    case "$TIPO" in
-        "ativos"|"running")
-            # echo "Listando apenas VMs LIGADAS:"
-            virsh --connect "$SESSION" list --state-running --name
-            ;;
-        "inativos"|"shutoff")
-            # echo "Listando apenas VMs DESLIGADAS:"
-            virsh --connect "$SESSION" list --inactive --name
-            ;;
-        "todas"|"all")
-            # echo "Listando TODAS as VMs:"
-            virsh --connect "$SESSION" list --all
-            ;;
-        "nomes")
-            # Útil para usar em loops de outros scripts
-            virsh --connect "$SESSION" list --all --name
-            ;;
-        *)
-            echo "Uso: list_vms [ativos|inativos|todas|nomes]"
-            return 1
-            ;;
-    esac
+	case "$TIPO" in
+	"ativos" | "running")
+		# echo "Listando apenas VMs LIGADAS:"
+		virsh --connect "$SESSION" list --state-running --name
+		;;
+	"inativos" | "shutoff")
+		# echo "Listando apenas VMs DESLIGADAS:"
+		virsh --connect "$SESSION" list --inactive --name
+		;;
+	"todas" | "all")
+		# echo "Listando TODAS as VMs:"
+		virsh --connect "$SESSION" list --all
+		;;
+	"nomes")
+		# Útil para usar em loops de outros scripts
+		virsh --connect "$SESSION" list --all --name
+		;;
+	*)
+		echo "Uso: list_vms [ativos|inativos|todas|nomes]"
+		return 1
+		;;
+	esac
 }
 
 # Função para Abrir o Virt Viewer para mostrar a tela da VM especificada
 open_vm() {
-    # Abre o Virt Viewer com a VM especificada pelo nome
-    virt-viewer --connect "$SESSION" --reconnect --zoom=100 --direct --attach --auto-resize=always --cursor=auto --shared "$1"
+	# Abre o Virt Viewer com a VM especificada pelo nome
+	virt-viewer --connect "$SESSION" --reconnect --zoom=100 --direct --attach --auto-resize=always --cursor=auto --shared "$1"
 }
 
 # Função para edição manual do XML da Máquina Virtual especificada.
 edit_vm() {
-    # Edição da Máquina Virtual
-    virsh --connect "$SESSION" edit "$1"
+	# Edição da Máquina Virtual
+	virsh --connect "$SESSION" edit "$1"
 }
 # Função para iniciar uma máquina virtual
 start_vm() {
-    # Inicia a VM especificada pelo nome
-    virsh --connect "$SESSION" start "$1"
+	# Inicia a VM especificada pelo nome
+	virsh --connect "$SESSION" start "$1"
 }
 
 # Função para parar uma máquina virtual de maneira graciosa
 stop_vm() {
-    # Para a VM especificada pelo nome
-    virsh --connect "$SESSION" shutdown "$1"
+	# Para a VM especificada pelo nome
+	virsh --connect "$SESSION" shutdown "$1"
 }
 
 # Função para parar uma máquina virtual de forma forçada
 stop_force_vm() {
-    # Para a VM especificada de forma forçada (desliga sem esperar)
-    virsh --connect "$SESSION" destroy "$1"
+	# Para a VM especificada de forma forçada (desliga sem esperar)
+	virsh --connect "$SESSION" destroy "$1"
 }
 
 # Função para remover uma máquina virtual
 remove_vm() {
 	# Parâmetro: Nome da máquina virtual
-    local VM_NAME="$1"
+	local VM_NAME="$1"
 
-    # Verifica se o nome da VM foi fornecido
-    if [ -z "$VM_NAME" ]; then
-        echo ""
-        return 1  # Retorna código de erro 1 (indicando falha)
-    fi
+	# Verifica se o nome da VM foi fornecido
+	if [ -z "$VM_NAME" ]; then
+		echo ""
+		return 1 # Retorna código de erro 1 (indicando falha)
+	fi
 
 	# Filtra por 'disk' (ignora 'cdrom') e pega o caminho do arquivo
 	ARQUIVO_DISCO=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | awk '$2=="disk" {print $4}')
 
-    # Remove a VM especificada pelo nome e a configuração de NVRAM (se houver)
-    virsh --connect "$SESSION" undefine "$1" --nvram
+	# Remove a VM especificada pelo nome e a configuração de NVRAM (se houver)
+	virsh --connect "$SESSION" undefine "$1" --nvram
 	rm -rfv "$ARQUIVO_DISCO"
 }
 
 # Função para exibir informações sobre o disco de uma máquina virtual
 show_vm_disk_info() {
-    # 1. Verifica se o nome da VM foi passado
-    if [ -z "$1" ]; then
-        echo "Erro: Nome da VM não especificado."
-        return 1
-    fi
+	# 1. Verifica se o nome da VM foi passado
+	if [ -z "$1" ]; then
+		echo "Erro: Nome da VM não especificado."
+		return 1
+	fi
 
-    local VM_NAME="$1"
+	local VM_NAME="$1"
 
-    # 2. Comando blindado:
-    # --domain: Garante que o virsh saiba quem é a VM
-    # --all: Lista todos os discos (essencial para snapshots externos)
-    # --human: Formata tamanhos para G, M ou K (melhor para o YAD)
-    virsh --connect "$SESSION" domblkinfo --domain "$VM_NAME" --all --human
+	# 2. Comando blindado:
+	# --domain: Garante que o virsh saiba quem é a VM
+	# --all: Lista todos os discos (essencial para snapshots externos)
+	# --human: Formata tamanhos para G, M ou K (melhor para o YAD)
+	virsh --connect "$SESSION" domblkinfo --domain "$VM_NAME" --all --human
 }
 
 # Função para exibir informações do arquivo .qcow2 usando fdisk -l
 show_qcow2_fdisk() {
-    if [ $# -ne 1 ]; then
-        echo "Uso: $0 show_qcow2_fdisk ARQUIVO_QCOW2"
-        exit 1
-    fi
+	if [ $# -ne 1 ]; then
+		echo "Uso: $0 show_qcow2_fdisk ARQUIVO_QCOW2"
+		exit 1
+	fi
 
-    arquivo_qcow2="$1"
+	arquivo_qcow2="$1"
 
-    loop_device=$(sudo losetup -f --show "$arquivo_qcow2")
-    if [ -z "$loop_device" ]; then
-        echo "Não foi possível montar o arquivo QCOW2."
-        exit 1
-    fi
+	loop_device=$(sudo losetup -f --show "$arquivo_qcow2")
+	if [ -z "$loop_device" ]; then
+		echo "Não foi possível montar o arquivo QCOW2."
+		exit 1
+	fi
 
-    sudo fdisk -l "$loop_device"
-    sudo losetup -d "$loop_device"
-    exit 0
+	sudo fdisk -l "$loop_device"
+	sudo losetup -d "$loop_device"
+	exit 0
 }
 
 # Função para exibir informações sobre o disco QCOW2
 show_qcow2_info() {
-    # Obtém o caminho do arquivo .qcow2 associado à VM
-    local caminho_arquivo
-    caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$1" --details | awk '/disk/ {print $4}')
+	# Obtém o caminho do arquivo .qcow2 associado à VM
+	local caminho_arquivo
+	caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$1" --details | awk '/disk/ {print $4}')
 
-    # Se o arquivo existir, exibe as informações do disco
-    if [ -n "$caminho_arquivo" ]; then
-        sudo qemu-img info "$caminho_arquivo"
-    else
-        echo "Máquina virtual não encontrada ou sem disco associado."
-    fi
+	# Se o arquivo existir, exibe as informações do disco
+	if [ -n "$caminho_arquivo" ]; then
+		sudo qemu-img info "$caminho_arquivo"
+	else
+		echo "Máquina virtual não encontrada ou sem disco associado."
+	fi
 }
 
 # Função para redimensionar o disco de uma máquina virtual
 resize_vm_disk() {
-    local vm="$1"
-    local aumento="$2"
-    local operacao_sucesso=false
-    local detalhes disco_alvo caminho_arquivo antes_human antes_gb depois_human estado_vm
+	local vm="$1"
+	local aumento="$2"
+	local detalhes disco_alvo caminho_arquivo antes_human antes_gb estado_vm
 
-    # 1. Coleta dados
-    detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
-    disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
-    caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
-    estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep "Estado" | cut -d: -f2 | xargs)
+	# 1. Coleta dados
+	detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
+	disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
+	caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
+	estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep -iE "Estado|State" | cut -d: -f2 | xargs)
 
-    # 2. Pega o tamanho atual apenas em NÚMERO (remove vírgulas e letras)
-    # Precisamos disso para somar matematicamente no script
-    antes_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
-    antes_gb=$(echo "$antes_human" | sed 's/,/./' | sed 's/[^0-9.]//g' | awk '{print int($1)}')
+	# 2. SE houver snapshot, unifica antes de aumentar (Reaproveitando a lógica do shrink)
+	while [[ "$caminho_arquivo" == *"-snap-"* ]]; do
+		echo "Limpando snapshot antes do aumento: $(basename "$caminho_arquivo")"
 
-    # 3. Calcula o NOVO TOTAL (Ex: 25 + 5 = 30)
-    local novo_total
-    novo_total=$((antes_gb + aumento))
+		local snap_name
+		snap_name=$(virsh --connect "$SESSION" snapshot-list "$vm" --name | grep -F "$(basename "$caminho_arquivo" | rev | cut -d- -f1 | rev)" | head -n1)
 
-    # 4. Executa o comando usando o VALOR ABSOLUTO
-    if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
-        # Online: Tentamos sem o sinal de +, passando o novo total acumulado
-        if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size "${novo_total}G" > /dev/null 2>&1; then
-            operacao_sucesso=true
-        fi
-    else
-        # Offline: qemu-img com valor absoluto (sem o sinal de + no comando)
-        if qemu-img resize "$caminho_arquivo" "${novo_total}G" > /dev/null 2>&1; then
-            operacao_sucesso=true
-        fi
-    fi
+		if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
+			# Merge Online
+			local arquivo_velho="$caminho_arquivo"
+			if virsh --connect "$SESSION" blockcommit "$vm" "$disco_alvo" --active --pivot --verbose; then
+				sleep 1
+				sudo rm -f "$arquivo_velho"
+				[[ -n "$snap_name" ]] && virsh --connect "$SESSION" snapshot-delete "$vm" "$snap_name" --metadata
+				caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/ {print $4}' | head -n1)
+			else
+				echo "ERRO: Falha ao unificar snapshot online." && return 1
+			fi
+		else
+			# Merge Offline
+			local arquivo_velho="$caminho_arquivo"
+			if sudo qemu-img commit "$arquivo_velho"; then
+				local backing_file
+				backing_file=$(sudo qemu-img info "$arquivo_velho" | grep "backing file:" | cut -d: -f2- | xargs)
+				if [[ -n "$backing_file" ]]; then
+					virsh --connect "$SESSION" detach-disk "$vm" "$disco_alvo" --config >/dev/null
+					virsh --connect "$SESSION" attach-disk "$vm" "$backing_file" "$disco_alvo" --config --subdriver qcow2 >/dev/null
+					sudo rm -f "$arquivo_velho"
+					[[ -n "$snap_name" ]] && virsh --connect "$SESSION" snapshot-delete "$vm" "$snap_name" --metadata
+					caminho_arquivo="$backing_file"
+				else
+					break
+				fi
+			else
+				echo "ERRO: Falha ao unificar snapshot offline." && return 1
+			fi
+		fi
+		estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep -iE "Estado|State" | cut -d: -f2 | xargs)
+	done
 
-    # 5. Relatório
-    if [[ "$operacao_sucesso" == "true" ]]; then
-        depois_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
-        echo "VM: $vm"
-        echo "ESTADO: $estado_vm"
-        echo "---"
-        echo "ANTES: $antes_human"
-        echo "AUMENTADO: +$aumento GB"
-        echo "TOTAL ATUALIZADO: $depois_human"
-    else
-        echo "ERRO: O sistema recusou o redimensionamento para ${novo_total}G."
-        return 1
-    fi
+	# 3. Calcula o novo tamanho baseado na base limpa
+	antes_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
+	antes_gb=$(echo "$antes_human" | sed 's/,/./' | sed 's/[^0-9.]//g' | awk '{print int($1)}')
+	local novo_total=$((antes_gb + aumento))
+
+	# 4. Executa o Aumento
+	echo "Aumentando disco para ${novo_total}G..."
+	if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
+		if virsh --connect "$SESSION" blockresize "$vm" "$disco_alvo" --size "${novo_total}G"; then
+			operacao_sucesso=true
+		fi
+	else
+		# Usamos sudo no qemu-img resize devido às permissões do Libvirt/ACL
+		if sudo qemu-img resize "$caminho_arquivo" "${novo_total}G"; then
+			operacao_sucesso=true
+		fi
+	fi
+
+	# 5. Relatório Final
+	if [[ "$operacao_sucesso" == "true" ]]; then
+		depois_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
+		echo "VM: $vm"
+		echo "ESTADO: $estado_vm"
+		echo "---"
+		echo "ANTES: $antes_human"
+		echo "AUMENTADO: +$aumento GB"
+		echo "TOTAL ATUALIZADO: $depois_human"
+	else
+		echo "ERRO: O sistema recusou o redimensionamento."
+		return 1
+	fi
 }
 
 # Função para reduzir o tamanho do disco de uma máquina virtual
 shrink_vm_disk() {
-    local vm="$1"
-    local reducao="$2"
-    local detalhes disco_alvo caminho_arquivo antes_human antes_gb estado_vm
+	local vm="$1"
+	local reducao="$2"
+	local detalhes disco_alvo caminho_arquivo antes_human antes_gb estado_vm
 
-    # 1. Coleta dados básicos
-    detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
-    disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
-    caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
-    estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep -iE "Estado|State" | cut -d: -f2 | xargs)
+	# 1. Coleta dados básicos da VM
+	detalhes=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/')
+	disco_alvo=$(echo "$detalhes" | awk '{print $3}' | head -n1)
+	caminho_arquivo=$(echo "$detalhes" | awk '{print $4}' | head -n1)
+	estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep -iE "Estado|State" | cut -d: -f2 | xargs)
 
-    # 2. Loop de Unificação (Merge) - Limpa toda a árvore de snapshots
-    while [[ "$caminho_arquivo" == *"-snap-"* ]]; do
-        echo "Detectada camada de snapshot: $(basename "$caminho_arquivo")"
-        
-        if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
-            # OPÇÃO 1: Online (Blockcommit)
-            echo "VM Ligada: Executando merge ativo (pivot)..."
-            local arquivo_velho="$caminho_arquivo"
-            if virsh --connect "$SESSION" blockcommit "$vm" "$disco_alvo" --active --pivot --verbose; then
-                sleep 1 # Pausa técnica para o Libvirt liberar o descritor de arquivo
-                sudo rm -f "$arquivo_velho"
-                caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/ {print $4}' | head -n1)
-            else
-                echo "ERRO: Falha no merge online." && return 1
-            fi
-        else
-            # OPÇÃO 2: Offline (Merge + Troca de XML + Remoção)
-            echo "VM Desligada: Mesclando dados para o arquivo base..."
-            local arquivo_velho="$caminho_arquivo"
-            
-            if sudo qemu-img commit "$arquivo_velho"; then
-                local backing_file
-                backing_file=$(sudo qemu-img info "$arquivo_velho" | grep "backing file:" | cut -d: -f2- | xargs)
-                
-                if [ -n "$backing_file" ]; then
-                    echo "Atualizando XML para o pai: $(basename "$backing_file")"
-                    virsh --connect "$SESSION" detach-disk "$vm" "$disco_alvo" --config > /dev/null
-                    virsh --connect "$SESSION" attach-disk "$vm" "$backing_file" "$disco_alvo" --config --subdriver qcow2 > /dev/null
-                    
-                    echo "Removendo arquivo órfão..."
-                    sudo rm -f "$arquivo_velho"
-                    caminho_arquivo="$backing_file"
-                else
-                    break # Chegou no fim da cadeia
-                fi
-            else
-                echo "ERRO: Falha no merge offline." && return 1
-            fi
-        fi
-        # Atualiza o estado da VM para a próxima volta do loop (caso ela tenha sido desligada no meio)
-        estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep -iE "Estado|State" | cut -d: -f2 | xargs)
-    done
+	# 2. Loop de Unificação (Merge)
+	while [[ "$caminho_arquivo" == *"-snap-"* ]]; do
+		echo "Limpando snapshot: $(basename "$caminho_arquivo")"
 
-    # 3. Execução do Shrink (Redução Física)
-    # Pega o tamanho atual da base limpa
-    antes_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
-    antes_gb=$(echo "$antes_human" | sed 's/,/./' | sed 's/[^0-9.]//g' | awk '{print int($1)}')
-    local novo_total=$((antes_gb - reducao))
+		local snap_name
+		snap_name=$(virsh --connect "$SESSION" snapshot-list "$vm" --name | grep -F "$(basename "$caminho_arquivo" | rev | cut -d- -f1 | rev)" | head -n1)
 
-    # O qemu-img resize SÓ funciona com a VM desligada
-    if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
-        echo "Merge concluído e snapshots removidos."
-        echo "AVISO: Desligue a VM para aplicar a redução final de -$reducao GB."
-        return 0
-    fi
+		if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
+			# OPÇÃO 1: Merge Online
+			local arquivo_velho="$caminho_arquivo"
+			if virsh --connect "$SESSION" blockcommit "$vm" "$disco_alvo" --active --pivot --verbose; then
+				sleep 1
+				sudo rm -f "$arquivo_velho"
+				[[ -n "$snap_name" ]] && virsh --connect "$SESSION" snapshot-delete "$vm" "$snap_name" --metadata
+				caminho_arquivo=$(virsh --connect "$SESSION" domblklist "$vm" --details | awk '/disk/ {print $4}' | head -n1)
+			else
+				echo "ERRO: Falha ao unificar snapshot online." && return 1
+			fi
+		else
+			# OPÇÃO 2: Merge Offline
+			local arquivo_velho="$caminho_arquivo"
+			if sudo qemu-img commit "$arquivo_velho"; then
+				local backing_file
+				backing_file=$(sudo qemu-img info "$arquivo_velho" | grep "backing file:" | cut -d: -f2- | xargs)
+				if [[ -n "$backing_file" ]]; then
+					virsh --connect "$SESSION" detach-disk "$vm" "$disco_alvo" --config >/dev/null
+					virsh --connect "$SESSION" attach-disk "$vm" "$backing_file" "$disco_alvo" --config --subdriver qcow2 >/dev/null
+					sudo rm -f "$arquivo_velho"
+					[[ -n "$snap_name" ]] && virsh --connect "$SESSION" snapshot-delete "$vm" "$snap_name" --metadata
+					caminho_arquivo="$backing_file"
+				else
+					break
+				fi
+			else
+				echo "ERRO: Falha ao unificar snapshot offline." && return 1
+			fi
+		fi
+		# Revalida o estado para a próxima iteração do loop
+		estado_vm=$(virsh --connect "$SESSION" dominfo "$vm" | grep -iE "Estado|State" | cut -d: -f2 | xargs)
+	done
 
-    echo "Executando redução física para ${novo_total}G..."
-    if sudo qemu-img resize --shrink "$caminho_arquivo" "${novo_total}G"; then
-        echo "-------------------------------------------"
-        echo "SUCESSO: Disco reduzido e snapshots limpos."
-        echo "VM: $vm"
-        echo "ANTES: $antes_human"
-        echo "TOTAL ATUALIZADO: ${novo_total} GB"
-        echo "-------------------------------------------"
-    else
-        echo "ERRO: Falha final no qemu-img resize."
-    fi
+	# 3. Execução do Resize (Redução Física)
+	antes_human=$(virsh --connect "$SESSION" domblkinfo "$vm" "$disco_alvo" --human | grep -iE "Capac|Capacit" | awk '{print $2}')
+	antes_gb=$(echo "$antes_human" | sed 's/,/./' | sed 's/[^0-9.]//g' | awk '{print int($1)}')
+	local novo_total=$((antes_gb - reducao))
+
+	if [[ "$estado_vm" == "executando" ]] || [[ "$estado_vm" == "running" ]]; then
+		echo "---"
+		echo "Consolidação concluída. Snapshots removidos com sucesso."
+		echo "Para aplicar a redução de -$reducao GB, por favor DESLIGUE a VM e execute este comando novamente."
+		return 0
+	fi
+
+	echo "Executando redução física para ${novo_total}G..."
+	if sudo qemu-img resize --shrink "$caminho_arquivo" "${novo_total}G"; then
+		echo "-------------------------------------------"
+		echo "SUCESSO: Disco reduzido e snapshots limpos."
+		echo "VM: $vm"
+		echo "ANTES: $antes_human"
+		echo "TOTAL ATUALIZADO: ${novo_total} GB"
+		echo "-------------------------------------------"
+	else
+		echo "ERRO: Falha final no qemu-img resize."
+		return 1
+	fi
 }
 
 # Função para montar um disco QCOW2
 cfdisk_qcow2() {
-    # Monta a partição do disco QCOW2 e exibe o cfdisk
-    local loop_device
-    loop_device=$(sudo losetup -f --show "$1")
+	# Monta a partição do disco QCOW2 e exibe o cfdisk
+	local loop_device
+	loop_device=$(sudo losetup -f --show "$1")
 
-    sudo cfdisk "$loop_device"
-    # Desmonta o loop device após o uso
-    sudo losetup -d "$loop_device"
+	sudo cfdisk "$loop_device"
+	# Desmonta o loop device após o uso
+	sudo losetup -d "$loop_device"
 }
 
 # Função para listar os snapshots de uma VM
 list_snapshots() {
-    # Lista todos os snapshots de uma VM
-    if [ $# -ne 1 ] || [ -z "$1" ] ; then
-        echo "Uso: $0 list_snapshots NOME_DA_MAQUINA"
-        exit 1
-    fi
+	# Lista todos os snapshots de uma VM
+	if [ $# -ne 1 ] || [ -z "$1" ]; then
+		echo "Uso: $0 list_snapshots NOME_DA_MAQUINA"
+		exit 1
+	fi
 
-    nome_maquina="$1"
-    virsh --connect "$SESSION" snapshot-list "$nome_maquina"
+	nome_maquina="$1"
+	virsh --connect "$SESSION" snapshot-list "$nome_maquina"
 }
 
 # Função para criar um snapshot de uma VM
 create_snapshot() {
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-        echo "Uso: $0 create_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
-        exit 1
+	# Validação: o nome da VM é obrigatório
+	# Verificação de Ajuda
+    if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        print_help_create_snapshot
+        return 1
     fi
 
-    local nome_maquina="$1"
-    local nome_snapshot="$2"
-    local descricao="Snapshot externo criado através do script"
+	local nome_maquina="$1"
+	local nome_snapshot="$2"
+	local descricao="Snapshot externo criado através do virt-qmod"
 
-    # Usando --disk-only para evitar o erro de pflash/NVRAM
-    # Usando --atomic para garantir que ou cria tudo ou nada (segurança)
-    virsh --connect "$SESSION" snapshot-create-as \
-        --domain "$nome_maquina" \
-        --name "$nome_snapshot" \
-        --description "$descricao" \
-        --disk-only \
-        --atomic
+	# 1. Lógica Híbrida de Nomenclatura
+	if [ -z "$nome_snapshot" ]; then
+		# Se não informou o nome, gera o automático com timestamp
+		local timestamp
+		timestamp=$(date +"%Y%m%d-%H%M%S")
+		nome_snapshot="${nome_maquina}-snap-${timestamp}"
+		echo "Gerando nome automático: [$nome_snapshot]"
+	else
+		# Se informou, usa o nome fornecido
+		echo "Usando nome personalizado: [$nome_snapshot]"
+	fi
+
+	# 2. Execução técnica via virsh
+	# --disk-only: essencial para VMs com UEFI/NVRAM para evitar erros de escrita
+	# --atomic: garante que a operação seja concluída com sucesso ou revertida em caso de falha
+	if virsh --connect "$SESSION" snapshot-create-as \
+		--domain "$nome_maquina" \
+		--name "$nome_snapshot" \
+		--description "$descricao" \
+		--disk-only \
+		--atomic; then
+		echo "Snapshot [$nome_snapshot] criado com sucesso!"
+	else
+		echo "Erro ao criar o snapshot para a máquina [$nome_maquina]."
+		return 1
+	fi
 }
+# Função para comitar um snapshot
+# --- Função Auxiliar de Commit (Mesclagem) ---
+commit_snapshot() {
+	local nome_maquina="$1"
+	local nome_snapshot="$2"
 
+	# Extrai o caminho do arquivo .qcow2 do snapshot
+	local arquivo_snap
+	arquivo_snap=$(virsh --connect "$SESSION" snapshot-dumpxml "$nome_maquina" "$nome_snapshot" | xmllint --xpath "string(/domainsnapshot/disks/disk/source/@file)" - 2>/dev/null)
+
+	if [ -z "$arquivo_snap" ]; then
+		echo "Erro: Não foi possível localizar o arquivo físico do snapshot."
+		return 1
+	fi
+
+	# Verifica o estado da VM (Usando sua função list_vms ativos)
+	if list_vms ativos | grep -q -w "$nome_maquina"; then
+		echo "VM Ativa: Iniciando blockcommit online..."
+		# O Libvirt mescla o topo da cadeia no disco base (vda)
+		virsh --connect "$SESSION" blockcommit "$nome_maquina" vda --active --pivot --wait
+	else
+		echo "VM Desligada: Usando qemu-img commit (offline)..."
+		# O qemu-img mescla o arquivo no seu 'backing file'
+		# Adicionado o sudo para garantir acesso aos arquivos do libvirt
+		sudo qemu-img commit "$arquivo_snap"
+	fi
+}
 # Função para excluir um snapshot de uma VM
+# --- Função Principal de Deleção ---
 delete_snapshot() {
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-        echo "Uso: $0 delete_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
-        exit 1
+    if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        print_help_delete_snapshot
+        return 1
     fi
 
     local nome_maquina="$1"
     local nome_snapshot="$2"
+    local opcao="$3"
 
-    echo "Removendo snapshot externo: $nome_snapshot..."
+    # 1. MODO INTERATIVO
+    if [ -z "$nome_snapshot" ]; then
+        echo "Modo Interativo: Localizando snapshots para [$nome_maquina]..."
+        virsh --connect "$SESSION" snapshot-list "$nome_maquina"
+        echo ""
+        read -r -p "Digite o nome do snapshot que deseja DELETAR: " nome_snapshot
+        [[ -z "$nome_snapshot" ]] && { echo "Operação cancelada."; return 1; }
+        read -r -p "Deseja remover apenas os METADADOS (m) ou realizar o COMMIT e DELETAR TUDO (t)? [m/t]: " tipo_del
+        if [[ "$tipo_del" == "m" || "$tipo_del" == "M" ]]; then opcao="--meta"; else opcao="--full"; fi
+    fi
+
+    # 2. CAPTURA DE DADOS (Antes de qualquer alteração)
+    # Pegamos o arquivo atual do snapshot
+    local arquivo_snap
+    arquivo_snap=$(virsh --connect "$SESSION" snapshot-dumpxml "$nome_maquina" "$nome_snapshot" | xmllint --xpath "string(/domainsnapshot/disks/disk/source/@file)" - 2>/dev/null)
     
-    # Para snapshots externos, usamos --metadata para remover a referência.
-    # Nota: Isso não deleta o arquivo .qcow2 criado, apenas a referência no virsh.
-    # Se quiser deletar o arquivo e os dados dele, usa-se --children ou blockcommit.
-    virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata
+    # Pegamos o arquivo BASE (pai) usando qemu-img info
+    local arquivo_base
+    arquivo_base=$(sudo qemu-img info "$arquivo_snap" 2>/dev/null | grep "backing file:" | cut -d ':' -f2- | xargs)
+
+    # 3. EXECUÇÃO
+    if [[ "$opcao" == "--meta" ]]; then
+        echo "Removendo apenas metadados..."
+        virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata
+    else
+        echo "Iniciando consolidação total (Commit + Delete) de [$nome_snapshot]..."
+        
+        # Verifica se a VM está ativa
+        local vm_ativa=false
+        if virsh --connect "$SESSION" list --name | grep -q -w "$nome_maquina"; then
+            vm_ativa=true
+        fi
+
+        if commit_snapshot "$nome_maquina" "$nome_snapshot"; then
+            
+            # SE ESTIVER OFFLINE: Forçamos o Libvirt a esquecer o snapshot e usar o base
+# CORREÇÃO OFFLINE BLINDADA
+            if [ "$vm_ativa" = false ]; then
+                if [ -n "$arquivo_base" ]; then
+                    echo "VM Offline: Redefinindo hierarquia de disco para o base..."
+                    
+                    # 1. Extraímos o XML
+                    # 2. Removemos TODA a seção <backingStore> (que causa o erro de lock)
+                    # 3. Trocamos o arquivo de snapshot pelo base
+                    # 4. Redefinimos a VM
+                    virsh --connect "$SESSION" dumpxml "$nome_maquina" | \
+                    perl -0777 -pe 's/<backingStore.*?>.*?<\/backingStore>//gs' | \
+                    sed "s|source file='$arquivo_snap'|source file='$arquivo_base'|g" | \
+                    virsh --connect "$SESSION" define /dev/stdin > /dev/null
+                    
+                    echo "Hierarquia limpa e apontando para: [$arquivo_base]"
+                else
+                    echo "Aviso: Arquivo base não encontrado. O XML pode precisar de ajuste manual."
+                fi
+            fi
+
+            # Deleta os registros de snapshot do Libvirt
+            virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata --children
+            
+            # Remove o arquivo físico
+            if [ -f "$arquivo_snap" ]; then
+                rm -f "$arquivo_snap"
+                echo "Arquivo físico removido. HD limpo!"
+            fi
+            echo "Operação concluída com sucesso."
+        else
+            echo "Erro crítico: Falha no commit. Operação abortada."
+            return 1
+        fi
+    fi
 }
 
 # Função para restaurar um snapshot específico de uma VM
 restore_snapshot() {
-    if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-        echo "Uso: $0 restore_snapshot NOME_DA_MAQUINA NOME_DO_SNAPSHOT"
-        exit 1
-    fi
-
-    local nome_maquina="$1"
-    local nome_snapshot="$2"
-
-    # Segurança: Verifica se a VM está ligada
-    if virsh --connect "$SESSION" dominfo "$nome_maquina" | grep -q "running"; then
-        echo "Erro: A VM deve estar DESLIGADA para restaurar um snapshot externo."
+	if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        print_help_restore_snapshot
         return 1
     fi
+	local nome_maquina="$1"
+	local nome_snapshot="$2"
 
-    echo "Restaurando snapshot: $nome_snapshot..."
-    
-    # Flag --force é frequentemente necessária para snapshots externos
-    virsh --connect "$SESSION" snapshot-revert "$nome_maquina" "$nome_snapshot" --force
+	# 1. Modo Interativo para o nome do Snapshot
+	if [ -z "$nome_snapshot" ]; then
+		echo "Listando snapshots disponíveis para [$nome_maquina]..."
+		virsh --connect "$SESSION" snapshot-list "$nome_maquina"
+		echo ""
+		read -r -p "Digite o nome do snapshot que deseja restaurar: " nome_snapshot
+		[[ -z "$nome_snapshot" ]] && {
+			echo "Operação cancelada."
+			return 1
+		}
+	fi
+
+	# 2. Segurança: Usa sua função interna para verificar se a VM está ativa
+	# Se a VM estiver na lista de ativos, ela não pode ser restaurada.
+	if list_vms ativos | grep -q -w "$nome_maquina"; then
+		echo "Erro: A VM [$nome_maquina] está ATIVA. Desligue-a para restaurar o snapshot."
+		return 1
+	fi
+
+	# 3. Execução do Revert
+	echo "Restaurando snapshot: $nome_snapshot em $nome_maquina..."
+	if virsh --connect "$SESSION" snapshot-revert "$nome_maquina" "$nome_snapshot" --force; then
+		echo "Snapshot [$nome_snapshot] restaurado com sucesso!"
+	else
+		echo "Erro ao restaurar snapshot. Verifique se o nome está correto."
+		return 1
+	fi
 }
 
 # Função para verificar e corrigir erros em um arquivo QCOW2
 check_qcow2() {
-    tipo_verificacao="$2"
-    local arquivo_qcow2
-    arquivo_qcow2="$3"
+	tipo_verificacao="$2"
+	local arquivo_qcow2
+	arquivo_qcow2="$3"
 
-    if [ "$2" = "-h" ] || [ "$2" = "--help" ]; then
-        echo "Uso: $0 TIPO_ARQUIVO ARQUIVO_QCOW2"
-        echo "Tipos válidos: simple, leaks, all"
-        exit 0
-    fi
+	if [ "$2" = "-h" ] || [ "$2" = "--help" ]; then
+		echo "Uso: $0 TIPO_ARQUIVO ARQUIVO_QCOW2"
+		echo "Tipos válidos: simple, leaks, all"
+		exit 0
+	fi
 
-    if [ $# -ne 3 ]; then
-        echo "Erro: Número incorreto de argumentos."
-        echo "Uso: $0 TIPO_ARQUIVO ARQUIVO_QCOW2"
-        echo "Tipos válidos: simple, leaks, all"
-        exit 1
-    fi
+	if [ $# -ne 3 ]; then
+		echo "Erro: Número incorreto de argumentos."
+		echo "Uso: $0 TIPO_ARQUIVO ARQUIVO_QCOW2"
+		echo "Tipos válidos: simple, leaks, all"
+		exit 1
+	fi
 
-    echo "tipo_verificacao de $tipo_verificacao"
-    echo "arquivo_qcow2 de $arquivo_qcow2"
+	echo "tipo_verificacao de $tipo_verificacao"
+	echo "arquivo_qcow2 de $arquivo_qcow2"
 
-    case $tipo_verificacao in
-    simple)
-        qemu-img check "$arquivo_qcow2"
-        ;;
-    leaks | all)
-        qemu-img check -r "$tipo_verificacao" "$arquivo_qcow2"
-        ;;
-    *)
-        echo "Tipo de verificação inválido: $tipo_verificacao"
-        exit 1
-        ;;
-    esac
-    exit 0
+	case $tipo_verificacao in
+	simple)
+		qemu-img check "$arquivo_qcow2"
+		;;
+	leaks | all)
+		qemu-img check -r "$tipo_verificacao" "$arquivo_qcow2"
+		;;
+	*)
+		echo "Tipo de verificação inválido: $tipo_verificacao"
+		exit 1
+		;;
+	esac
+	exit 0
 }
 
 # Função para verificar informações das CPUs de uma máquina virtual
 check_cpus() {
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 check_cpus NOME_DA_MAQUINA"
-        exit 1
-    fi
+	if [ $# -ne 2 ]; then
+		echo "Uso: $0 check_cpus NOME_DA_MAQUINA"
+		exit 1
+	fi
 
-    nome_maquina="$2"
-    virsh --connect "$SESSION" vcpuinfo "$nome_maquina"
+	nome_maquina="$2"
+	virsh --connect "$SESSION" vcpuinfo "$nome_maquina"
 }
 
 # Função para verificar informações das interfaces de rede de uma máquina virtual
 check_interfaces() {
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 check_interfaces NOME_DA_MAQUINA"
-        exit 1
-    fi
+	if [ $# -ne 2 ]; then
+		echo "Uso: $0 check_interfaces NOME_DA_MAQUINA"
+		exit 1
+	fi
 
-    nome_maquina="$2"
-    virsh --connect "$SESSION" domiflist "$nome_maquina"
+	nome_maquina="$2"
+	virsh --connect "$SESSION" domiflist "$nome_maquina"
 }
 
 # Função para verificar se uma ISO está montada em uma máquina virtual
 check_iso() {
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 check_iso NOME_DA_MAQUINA"
-        exit 1
-    fi
+	if [ $# -ne 2 ]; then
+		echo "Uso: $0 check_iso NOME_DA_MAQUINA"
+		exit 1
+	fi
 
-    nome_maquina="$2"
-    iso_path=$(virsh --connect "$SESSION" domblklist "$nome_maquina" | awk '$0 ~ /cdrom/ || $2 ~ /\.iso$/ { print $2 }')
+	nome_maquina="$2"
+	iso_path=$(virsh --connect "$SESSION" domblklist "$nome_maquina" | awk '$0 ~ /cdrom/ || $2 ~ /\.iso$/ { print $2 }')
 
-    if [ -z "$iso_path" ]; then
-        echo "Não há ISO montada na máquina virtual $nome_maquina."
-    else
-        echo "A ISO $iso_path está montada na máquina virtual $nome_maquina."
-    fi
+	if [ -z "$iso_path" ]; then
+		echo "Não há ISO montada na máquina virtual $nome_maquina."
+	else
+		echo "A ISO $iso_path está montada na máquina virtual $nome_maquina."
+	fi
 }
 
 # Função para ativar o Boot Menu de uma VM no libvirt/QEMU-KVM
 ativar_bootmenu() {
-    local VM_NAME="$1"
+	local VM_NAME="$1"
 
-    if [ -z "$VM_NAME" ]; then
-        echo "Uso: ativar_bootmenu <nome-da-vm>"
-        return 1
-    fi
+	if [ -z "$VM_NAME" ]; then
+		echo "Uso: ativar_bootmenu <nome-da-vm>"
+		return 1
+	fi
 
-    # Verifica se a VM existe
-    if ! virsh --connect "$SESSION" list --all | grep -q " $VM_NAME "; then
-        echo "Erro: A VM '$VM_NAME' não foi encontrada."
-        return 1
-    fi
+	# Verifica se a VM existe
+	if ! virsh --connect "$SESSION" list --all | grep -q " $VM_NAME "; then
+		echo "Erro: A VM '$VM_NAME' não foi encontrada."
+		return 1
+	fi
 
-    # Verifica se o Boot Menu já está ativado
-    if virsh --connect "$SESSION" dumpxml "$VM_NAME" | grep -q '<bootmenu enable="yes"/>'; then
-        echo "O Boot Menu está ativado para a VM: $VM_NAME."
-        return 0
-    fi
+	# Verifica se o Boot Menu já está ativado
+	if virsh --connect "$SESSION" dumpxml "$VM_NAME" | grep -q '<bootmenu enable="yes"/>'; then
+		echo "O Boot Menu está ativado para a VM: $VM_NAME."
+		return 0
+	fi
 
-# Executa a cadeia de comandos diretamente no if
-if virsh --connect "$SESSION" dumpxml "$VM_NAME" | \
-	sed 's|<os>|<os>\n    <bootmenu enable="yes"/>|' | \
-	virsh --connect "$SESSION" define /dev/stdin; then
-    echo "Boot Menu ativado com sucesso para a VM: $VM_NAME"
-else
-    echo "Erro ao ativar o Boot Menu para a VM: $VM_NAME"
-    return 1
-fi
+	# Executa a cadeia de comandos diretamente no if
+	if virsh --connect "$SESSION" dumpxml "$VM_NAME" |
+		sed 's|<os>|<os>\n    <bootmenu enable="yes"/>|' |
+		virsh --connect "$SESSION" define /dev/stdin; then
+		echo "Boot Menu ativado com sucesso para a VM: $VM_NAME"
+	else
+		echo "Erro ao ativar o Boot Menu para a VM: $VM_NAME"
+		return 1
+	fi
 }
 # Função para garantir que a VM inicialize primeiro pelo CD-ROM antes do HD
 set_boot_cdrom() {
-    # Parâmetro: Nome da máquina virtual
-    local VM_NAME="$1"
+	# Parâmetro: Nome da máquina virtual
+	local VM_NAME="$1"
 
-    # Verifica se o nome da VM foi fornecido
-    if [ -z "$VM_NAME" ]; then
-        echo "Uso: set_boot_cdrom <nome-da-vm>"
-        return 1  # Retorna código de erro 1 (indicando falha)
-    fi
+	# Verifica se o nome da VM foi fornecido
+	if [ -z "$VM_NAME" ]; then
+		echo "Uso: set_boot_cdrom <nome-da-vm>"
+		return 1 # Retorna código de erro 1 (indicando falha)
+	fi
 
-    # Obtém a configuração XML da VM e armazena na variável VM_XML
-    local VM_XML
-    VM_XML=$(virsh --connect "$SESSION" dumpxml "$VM_NAME")
+	# Obtém a configuração XML da VM e armazena na variável VM_XML
+	local VM_XML
+	VM_XML=$(virsh --connect "$SESSION" dumpxml "$VM_NAME")
 
-    # Verifica se a ordem de boot já tem o CD-ROM como primeira opção
-    if echo "$VM_XML" | grep -q "<boot dev='cdrom'/>"; then
-        echo "A VM '$VM_NAME' já está configurada para boot pelo CD-ROM."
-    else
-        echo "Alterando a ordem de boot da VM '$VM_NAME' para CD-ROM primeiro..."
+	# Verifica se a ordem de boot já tem o CD-ROM como primeira opção
+	if echo "$VM_XML" | grep -q "<boot dev='cdrom'/>"; then
+		echo "A VM '$VM_NAME' já está configurada para boot pelo CD-ROM."
+	else
+		echo "Alterando a ordem de boot da VM '$VM_NAME' para CD-ROM primeiro..."
 
-        # Modifica a ordem de boot para colocar o CD-ROM antes do HD
-        virsh dumpxml "$VM_NAME" | sed '/<boot dev="hd"\/>/a\    <boot dev="cdrom"\/>' | virsh define /dev/stdin
-    fi
+		# Modifica a ordem de boot para colocar o CD-ROM antes do HD
+		virsh dumpxml "$VM_NAME" | sed '/<boot dev="hd"\/>/a\    <boot dev="cdrom"\/>' | virsh define /dev/stdin
+	fi
 }
 # Função para montar a ISO em um dispositivo livre da máquina virtual
 attach_iso() {
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 attach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
-        exit 1
-    fi
+	[[ $# -ne 2 ]] && {
+		echo "Uso: attach_iso NOME_VM CAMINHO_ISO"
+		return 1
+	}
 
-    nome_maquina="$1"
-    caminho_iso="$2"
+	local nome_maquina="$1"
+	local caminho_iso="$2"
 
-    # Verifica dispositivos livres
-    devices_livres=()
-    for device in hdb hdc hdd hde hdf; do
-        virsh --connect "$SESSION" domblkinfo "$nome_maquina" "$device" &>/dev/null
-        if [ $? -eq 1 ]; then
-            devices_livres+=("$device")
-        fi
-    done
+	# 1. Verifica se a VM está rodando (running)
+	local estado
+	estado=$(virsh --connect "$SESSION" domstate "$nome_maquina")
 
-    if [ ${#devices_livres[@]} -eq 0 ]; then
-        novo_device="hdd"
-        echo "Não há dispositivos livres. Criando novo dispositivo: $novo_device"
-        virsh --connect "$SESSION" attach-disk "$nome_maquina" "$caminho_iso" "$device_livre" --type cdrom --driver qemu --subdriver qcow2 --config --persistent
+	# 2. Busca se já existe um dispositivo de CD-ROM no XML
+	local target_existente
+	target_existente=$(virsh --connect "$SESSION" domblklist "$nome_maquina" --details | grep 'cdrom' | awk '{print $3}' | head -n 1)
 
-    else
-        device_livre="${devices_livres[0]}"
-        echo "Adicionando ISO ao dispositivo livre: $device_livre"
-        virsh --connect "$SESSION" attach-disk "$nome_maquina" "$caminho_iso" --target "$device_livre" --driver qemu --type cdrom --mode readonly --config --persistent
-    fi
+	if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
+		echo "VM está ligada. Usando métodos de inserção de mídia..."
+
+		if [[ -n "$target_existente" ]]; then
+			# Tenta insert-media, se falhar tenta change-media
+			if ! virsh --connect "$SESSION" insert-media "$nome_maquina" "$caminho_iso" --target "$target_existente" --live --config 2>/dev/null; then
+				virsh --connect "$SESSION" change-media "$nome_maquina" "$target_existente" "$caminho_iso" --live --config
+			fi
+		else
+			# Se não tem o hardware, cria um novo "ao vivo"
+			local novo_target
+			for letra in {b..z}; do
+				if ! virsh --connect "$SESSION" domblklist "$nome_maquina" | grep -q "hd$letra"; then
+					novo_target="hd$letra"
+					break
+				fi
+			done
+			virsh --connect "$SESSION" attach-disk "$nome_maquina" "$caminho_iso" "$novo_target" --type cdrom --driver qemu --subdriver qcow2 --live --config
+		fi
+	else
+		if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
+			echo "VM está ligada. Usando métodos de inserção de mídia..."
+			# ... (sua lógica de insert/change-media já discutida)
+		else
+			echo "VM está desligada (shut off). Atualizando configuração XML..."
+			if [[ -n "$target_existente" ]]; then
+				# Se o alvo existe, usamos change-media --config para atualizar o XML offline
+				echo "Alvo $target_existente encontrado. Atualizando mídia no XML..."
+				virsh --connect "$SESSION" change-media "$nome_maquina" "$target_existente" "$caminho_iso" --config
+			else
+				# Se realmente não existe nenhum leitor, aí sim usamos attach-disk
+				local novo_target="hdb"
+				for letra in {b..z}; do
+					if ! virsh --connect "$SESSION" domblklist "$nome_maquina" | grep -q "hd$letra"; then
+						novo_target="hd$letra"
+						break
+					fi
+				done
+				virsh --connect "$SESSION" attach-disk "$nome_maquina" "$caminho_iso" "$novo_target" --type cdrom --driver qemu --subdriver qcow2 --config
+			fi
+		fi
+	fi
 }
+
 # Função para desmontar o dispositivo de CD-ROM montado na máquina virtual (EM EDIÇÃO)
 detach_iso() {
-    if [ $# -ne 2 ]; then
-        echo "Uso: $0 detach_iso NOME_DA_MAQUINA"
-        exit 1
-    fi
+	[[ $# -ne 2 ]] && {
+		echo "Uso: detach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
+		return 1
+	}
 
-    nome_maquina="$1"
-    caminho_iso="$2"
-    VM_NAME="$nome_maquina"
+	nome_maquina="$1"
+	caminho_iso="$2"
+	VM_NAME="$nome_maquina"
 
-    # Detectar o dispositivo onde a ISO está montada
-    iso_device=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep cdrom | awk '{print $3}')
+	# 1. Identifica o estado da VM (lidando com PT_BR e EN)
+	local estado
+	estado=$(virsh --connect "$SESSION" domstate "$VM_NAME")
 
-    if [ -n "$iso_device" ]; then
-        # Desmontar a ISO usando o comando virsh change-media
-        virsh --connect "$SESSION" change-media "$VM_NAME" "$iso_device" --eject
-        echo "ISO removida com sucesso da máquina virtual $VM_NAME."
-    else
-        echo "Nenhuma ISO montada encontrada na máquina virtual $VM_NAME."
-    fi
+	# 2. Localiza o target (hdb, hdc, etc) baseado no caminho da ISO
+	local target
+	target=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep "$caminho_iso" | awk '{print $3}' | head -n 1)
+
+	[[ -z "$target" ]] && {
+		echo "Erro: ISO não encontrada na VM [$VM_NAME]."
+		return 1
+	}
+
+	# 3. Execução baseada no estado
+	if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
+		echo "VM [$VM_NAME] está ligada. Tentando ejetar mídia..."
+		# Tenta eject-media, se falhar (comando desconhecido), usa change-media --eject
+		if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --live --config 2>/dev/null; then
+			echo "eject-media falhou. Usando change-media --eject..."
+			virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --live --config
+		fi
+	else
+		echo "VM [$VM_NAME] está desligada ($estado). Removendo mídia do XML..."
+		# Fallback similar para o estado offline
+		if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --config 2>/dev/null; then
+			echo "eject-media falhou. Usando change-media --eject no XML..."
+			virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --config
+		fi
+	fi
 }
 
 # Verifica a configuração gráfica da VM
 check_graphics() {
-    virsh --connect "$SESSION" dumpxml "$1" | grep graphics
+	virsh --connect "$SESSION" dumpxml "$1" | grep graphics
 }
 
 # Verifica a configuração de som da VM
 check_sound() {
-    sudo virsh --connect "$SESSION" dumpxml "$1" | grep -A5 '<sound' | grep -v 'video' | grep -v 'vga'
+	sudo virsh --connect "$SESSION" dumpxml "$1" | grep -A5 '<sound' | grep -v 'video' | grep -v 'vga'
 }
 
 # Função para exibir a ajuda do script
 print_help() {
-    # Exibe uma lista de opções de uso do script
-    echo "Uso: $VQCLI [-h] [--compress-only] [list_vms | start NOME_DA_MAQUINA | stop NOME_DA_MAQUINA ...]"
-    echo "  -h, --help                Exibe esta mensagem de ajuda"
-    echo "  create                    Cria uma Máquina Virtual. Suporta as opções {--(name,ram,vcpus,disk,cdrom,network,graphics,os-variant)}"
-    echo "  --name <nome>             Define o nome da VM"
-    echo "  --ram <tamanho>           Define a quantidade de RAM para a VM"
-    echo "  --vcpus <número>          Define o número de vCPUs para a VM"
-    echo "  --disk <tamanho>          Define o tamanho do disco da VM"
-    echo "  --cdrom <caminho>         Define o caminho do CD-ROM"
-    echo "  --network <rede>          Define a rede para a VM"
-    echo "  --graphics <tipo>         Define o tipo de gráfico para a VM"
-    echo "  --graphics <tipo>         Define o tipo de gráfico para a VM"
-    echo "  --os-variant              Define uma variante para o sistema operacional {list_variant}. (Padrão unknown)"
-    echo "  --compress-only           Realiza apenas a compactação dos arquivos"
-    echo "  list                      Lista as VMs"
-    echo "  list_variant              Lista todos os sistemas operacionais disponíveis para a criação da Máquina Virtual"
-    echo "  open                      Abre o Virt Viewer com a VM em execução especificada. (Verificar com list_vms)"
-    echo "  edit                   Edição manual (vi) do XML da Máquina Virtual especificada. (Verificar com list_vms (Deve estar desativada))"
-    echo "  start <nome>           Inicia a VM"
-    echo "  stop <nome>            Para a VM"
-    echo "  stop_force <nome>      Para a VM forçadamente"
-    echo "  remove <nome>          Remove a VM"
-    echo "  show_disk_info <nome>  Exibe informações sobre o disco da VM"
-    echo "  show_qcow2_fdisk <arquivo> Exibe informações sobre a partição do disco QCOW2"
-    echo "  show_qcow2_info <nome> Exibe informações sobre o disco QCOW2 da VM"
-    echo "  resize_disk <nome> <tamanho> Redimensiona o disco da VM"
-    echo "  shrink_disk <nome> <tamanho> Encolhe o disco da VM"
-    echo "  cfdisk_qcow2 <arquivo>     Monta o arquivo QCOW2 e abre edição com cfdisk"
-    echo "  list_snapshots <nome>     Lista os snapshots da VM"
-    echo "  create_snapshot <nome> <snapshot> Cria um snapshot da VM"
-    echo "  delete_snapshot <nome> <snapshot> Deleta um snapshot da VM"
-    echo "  restore_snapshot <nome> <snapshot> Restaura um snapshot da VM"
-    echo "  check_qcow2 <arquivo> <opções> Verifica a integridade do disco no arquivo QCOW2"
-    echo "  check_cpus <nome>         Verifica os CPUs da VM"
-    echo "  check_interfaces <nome>   Verifica as interfaces da VM"
-    echo "  check_iso <nome>          Verifica a existência do arquivo ISO na VM"
-    echo "  check_graphics <nome>     Verifica a configuração gráfica da VM"
-    echo "  check_sound <nome>        Verifica a configuração do som da VM"
-    echo "  attach_iso <nome> <iso>   Anexa o ISO à VM"
-    echo "  detach_iso <nome> <iso>   Desanexa o ISO da VM"
-    echo "  set_boot_cdrom <nome>     Define ordem de boot para inicializar primeiro pelo CD-ROM antes do HD"
+	# Exibe uma lista de opções de uso do script
+	echo "Uso: $VQCLI [-h] [--compress-only] [list_vms | start NOME_DA_MAQUINA | stop NOME_DA_MAQUINA ...]"
+	echo "  -h, --help                Exibe esta mensagem de ajuda"
+	echo "  create                    Cria uma Máquina Virtual. Suporta as opções {--(name,ram,vcpus,disk,cdrom,network,graphics,os-variant)}"
+	echo "  --name <nome>             Define o nome da VM"
+	echo "  --ram <tamanho>           Define a quantidade de RAM para a VM"
+	echo "  --vcpus <número>          Define o número de vCPUs para a VM"
+	echo "  --disk <tamanho>          Define o tamanho do disco da VM"
+	echo "  --cdrom <caminho>         Define o caminho do CD-ROM"
+	echo "  --network <rede>          Define a rede para a VM"
+	echo "  --graphics <tipo>         Define o tipo de gráfico para a VM"
+	echo "  --graphics <tipo>         Define o tipo de gráfico para a VM"
+	echo "  --os-variant              Define uma variante para o sistema operacional {list_variant}. (Padrão unknown)"
+	echo "  --compress-only           Realiza apenas a compactação dos arquivos"
+	echo "  list                      Lista as VMs"
+	echo "  list_variant              Lista todos os sistemas operacionais disponíveis para a criação da Máquina Virtual"
+	echo "  open                      Abre o Virt Viewer com a VM em execução especificada. (Verificar com list_vms)"
+	echo "  edit                   Edição manual (vi) do XML da Máquina Virtual especificada. (Verificar com list_vms (Deve estar desativada))"
+	echo "  start <nome>           Inicia a VM"
+	echo "  stop <nome>            Para a VM"
+	echo "  stop_force <nome>      Para a VM forçadamente"
+	echo "  remove <nome>          Remove a VM"
+	echo "  show_disk_info <nome>  Exibe informações sobre o disco da VM"
+	echo "  show_qcow2_fdisk <arquivo> Exibe informações sobre a partição do disco QCOW2"
+	echo "  show_qcow2_info <nome> Exibe informações sobre o disco QCOW2 da VM"
+	echo "  resize_disk <nome> <tamanho> Redimensiona o disco da VM"
+	echo "  shrink_disk <nome> <tamanho> Encolhe o disco da VM"
+	echo "  cfdisk_qcow2 <arquivo>     Monta o arquivo QCOW2 e abre edição com cfdisk"
+	echo "  list_snapshots <nome>     Lista os snapshots da VM"
+	echo "  create_snapshot <nome> <snapshot> Cria um snapshot da VM"
+	echo "  delete_snapshot <nome> <snapshot> Deleta um snapshot da VM" \(-h ou --help para mais detalhes\)
+	echo "  restore_snapshot <nome> <snapshot> Restaura um snapshot da VM" \(-h ou --help para mais detalhes\)
+	echo "  check_qcow2 <arquivo> <opções> Verifica a integridade do disco no arquivo QCOW2"
+	echo "  check_cpus <nome>         Verifica os CPUs da VM"
+	echo "  check_interfaces <nome>   Verifica as interfaces da VM"
+	echo "  check_iso <nome>          Verifica a existência do arquivo ISO na VM"
+	echo "  check_graphics <nome>     Verifica a configuração gráfica da VM"
+	echo "  check_sound <nome>        Verifica a configuração do som da VM"
+	echo "  attach_iso <nome> <iso>   Anexa o ISO à VM"
+	echo "  detach_iso <nome> <iso>   Desanexa o ISO da VM"
+	echo "  set_boot_cdrom <nome>     Define ordem de boot para inicializar primeiro pelo CD-ROM antes do HD"
+}
+print_help_create_snapshot() {
+    echo "virt-qmod - Gerenciador de Snapshots Libvirt"
+    echo ""
+    echo "Uso: $0 create_snapshot [NOME_VM] [NOME_SNAPSHOT]"
+    echo ""
+    echo "Descrição:"
+    echo "  Cria um novo snapshot externo (disk-only) para a máquina virtual."
+    echo ""
+    echo "Argumentos:"
+    echo "  NOME_VM        Nome da máquina virtual."
+    echo "  NOME_SNAPSHOT  (Opcional) Nome para o snapshot. Se omitido, usa o padrão: VM-snap-DATA-HORA."
+    echo ""
+    echo "Opções automáticas:"
+    echo "  --disk-only    Garante que o snapshot seja externo (cria um novo arquivo .qcow2)."
+    echo "  --quiesce      Tenta garantir a integridade do FS via Guest Agent."
+}
+print_help_delete_snapshot() {
+    echo "virt-qmod - Gerenciador de Snapshots Libvirt"
+    echo ""
+    echo "Uso: $0 delete_snapshot NOME_VM [NOME_SNAP] [OPÇÃO]"
+    echo ""
+    echo "Comandos:"
+    echo "  Se omitir [NOME_SNAP]: Entra no modo interativo assistido."
+    echo ""
+    echo "Opções no Modo Direto:"
+    echo "  (padrão)    Realiza o COMMIT (mescla dados) e apaga o arquivo físico."
+    echo "  --meta      Remove apenas a referência no Libvirt (metadados)."
+    echo ""
+    echo "Exemplos:"
+    echo "  $0 delete_snapshot minha-vm                   # Interativo"
+    echo "  $0 delete_snapshot minha-vm snap-01            # Commit + Delete"
+    echo "  $0 delete_snapshot minha-vm snap-01 --meta     # Só metadados"
+}
+print_help_restore_snapshot() {
+    echo "virt-qmod - Gerenciador de Snapshots Libvirt"
+    echo ""
+    echo "Uso: $0 restore_snapshot [NOME_VM] [NOME_SNAPSHOT]"
+    echo ""
+    echo "Descrição:"
+    echo "  Retorna o estado da máquina virtual para um snapshot específico."
+    echo ""
+    echo "Argumentos:"
+    echo "  NOME_VM        Nome da máquina virtual cadastrada no Libvirt."
+    echo "  NOME_SNAPSHOT  (Opcional) Nome do snapshot. Se omitido, o script listará os disponíveis."
+    echo ""
+    echo "Exemplos:"
+    echo "  $0 restore_snapshot minha-vm snap-estavel-v1"
+    echo "  $0 restore_snapshot minha-vm"
 }
 # Função para criar a máquina virtual com os parâmetros definidos
 create() {
-    echo -e "
+	echo -e "
     Criando Máquina Virtual com as configurações a seguir:
 
     Sessão: $SESSION
@@ -812,218 +1073,216 @@ create() {
     Variante: $OSVARIANT
     "
 
-    # Verifica se todos os parâmetros necessários foram definidos
-    if [[ -z $SESSION || -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$BOOT" || -z "$NETWORK" || -z "$GRAPHICS" || -z "$SOUND" ]]; then
-        echo "Erro: Todos os parâmetros (name, ram, vcpus, disk, cdrom, network, graphics) devem ser fornecidos."
-        exit 1
-    fi
+	# Verifica se todos os parâmetros necessários foram definidos
+	if [[ -z $SESSION || -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$BOOT" || -z "$NETWORK" || -z "$GRAPHICS" || -z "$SOUND" ]]; then
+		echo "Erro: Todos os parâmetros (name, ram, vcpus, disk, cdrom, network, graphics) devem ser fornecidos."
+		exit 1
+	fi
 
-    # Cria o disco virtual
-    qemu-img --connect "$SESSION" create -f "$DISK_FORMAT" "$DISK_PATH/$NAME.qcow2" "$DISK"G &>>/dev/null
+	# Cria o disco virtual
+	qemu-img --connect "$SESSION" create -f "$DISK_FORMAT" "$DISK_PATH/$NAME.qcow2" "$DISK"G &>>/dev/null
 
-    # Crie a definição da VM
-    virt-install --connect "$SESSION" \
-        --name "$NAME" \
-        --ram "$RAM" \
-        --vcpus "$VCPUS" \
-        --boot "$BOOT" \
-        --disk "$DISK_PATH/$NAME.qcow2,size=$DISK,bus=virtio" \
-        --network bridge="$NETWORK",model=virtio \
-        --sound "$SOUND" \
-        --os-variant="$OSVARIANT" \
-        --noreboot \
-        --noautoconsole \
-        --graphics "${GRAPHICS}" \
-        --boot menu="$BOOTMENU",hd,cdrom \
-        --memorybacking hugepages="$MEMORYBACKING" \
-        --osinfo detect=on,require=off \
-        --import
+	# Crie a definição da VM
+	virt-install --connect "$SESSION" \
+		--name "$NAME" \
+		--ram "$RAM" \
+		--vcpus "$VCPUS" \
+		--boot "$BOOT" \
+		--disk "$DISK_PATH/$NAME.qcow2,size=$DISK,bus=virtio" \
+		--disk "$CDROM,device=cdrom,bus=ide" \
+		--network bridge="$NETWORK",model=virtio \
+		--sound "$SOUND" \
+		--os-variant="$OSVARIANT" \
+		--noreboot \
+		--noautoconsole \
+		--graphics "${GRAPHICS}" \
+		--boot menu="$BOOTMENU",cdrom,hd \
+		--memorybacking hugepages="$MEMORYBACKING" \
+		--osinfo detect=on,require=off
 
-    # Inicie a VM no modo de instalação
-    attach_iso "$NAME" "$CDROM"
-    # start_vm
-
+	# Inicie a VM no modo de instalação
+	# start_vm
 }
 
 # Função para processar os parâmetros de linha de comando
 process_args() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            create)
-                shift  # Remove o 'create_vm'
-                ;;
-            --cdrom)
-                CDROM="$2"
-                shift 2  # Move para o próximo argumento
-                ;;
-            --name)
-                NAME="$2"
-                shift 2
-                ;;
-            --ram)
-                RAM="$2"
-                shift 2
-                ;;
-            --vcpus)
-                VCPUS="$2"
-                shift 2
-                ;;
-            --disk)
-                DISK="$2"
-                shift 2
-                ;;
-            --network)
-                NETWORK="$2"
-                shift 2
-                ;;
-            --graphics)
-                GRAPHICS="$2"
-                shift 2
-                ;;
-            --os-variant)
-                OSVARIANT="$2"
-                shift 2
-                ;;
-            --boot)
-                BOOT="$2"
-                shift 2
-                ;;
-            --sound)
-                SOUND="$2"
-                shift 2
-                ;;
-            --connect)
-                SESSION="$2"
-                shift 2
-                ;;
-            *)
-                echo "Erro: Opção inválida $1"
-                exit 1
-                ;;
-        esac
-    done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		create)
+			shift # Remove o 'create_vm'
+			;;
+		--cdrom)
+			CDROM="$2"
+			shift 2 # Move para o próximo argumento
+			;;
+		--name)
+			NAME="$2"
+			shift 2
+			;;
+		--ram)
+			RAM="$2"
+			shift 2
+			;;
+		--vcpus)
+			VCPUS="$2"
+			shift 2
+			;;
+		--disk)
+			DISK="$2"
+			shift 2
+			;;
+		--network)
+			NETWORK="$2"
+			shift 2
+			;;
+		--graphics)
+			GRAPHICS="$2"
+			shift 2
+			;;
+		--os-variant)
+			OSVARIANT="$2"
+			shift 2
+			;;
+		--boot)
+			BOOT="$2"
+			shift 2
+			;;
+		--sound)
+			SOUND="$2"
+			shift 2
+			;;
+		--connect)
+			SESSION="$2"
+			shift 2
+			;;
+		*)
+			echo "Erro: Opção inválida $1"
+			exit 1
+			;;
+		esac
+	done
 }
 # Função principal
 main() {
-    # Verifica os comandos necessários
-    verificar_comandos
+	# Verifica os comandos necessários
+	verificar_comandos
 
-    # Carrega as configurações do arquivo
-    carregar_config
+	# Carrega as configurações do arquivo
+	carregar_config
 
-    # Interpretação dos parâmetros
-    case "$1" in
-    -h | --help)
-        print_help
-        ;;
-    --compress-only)
-        compress_only
-        ;;
-    list)
-        list_vms "$2"
-        ;;
-    list_variant)
-        osinfo-query os --fields=id,name,version --sort=name
-    ;;
-    start)
-        start_vm "$2"
-        ;;
-    stop)
-        stop_vm "$2"
-        ;;
-    stop_force)
-        stop_force_vm "$2"
-        ;;
-    remove)
-        remove_vm "$2"
-        ;;
-    show_disk_info)
-        show_vm_disk_info "$2"
-        ;;
-    show_qcow2_fdisk)
-        show_qcow2_fdisk "$2"
-        ;;
-    show_qcow2_info)
-        show_qcow2_info "$2"
-        ;;
-    resize_disk)
-        resize_vm_disk "$2" "$3"
-        ;;
-    shrink_disk)
-        shrink_vm_disk "$2" "$3"
-        ;;
-    cfdisk_qcow2)
-        cfdisk_qcow2 "$2"
-        ;;
-    list_snapshots)
-        list_snapshots "$2"
-        ;;
-    create_snapshot)
-        create_snapshot "$2" "$3"
-        ;;
-    delete_snapshot)
-        delete_snapshot "$2" "$3"
-        ;;
-    restore_snapshot)
-        restore_snapshot "$2" "$3"
-        ;;
-    check_qcow2)
-        check_qcow2 "$@"
-        ;;
-    check_cpus)
-        check_cpus "$1" "$2"
-        exit 0
-        ;;
-    check_interfaces)
-        check_interfaces "$1" "$2"
-        exit 0
-        ;;
-    check_iso)
-        check_iso "$1" "$2"
-        exit 0
-        ;;
-    attach_iso)
-        attach_iso "$2" "$3"
-        exit 0
-        ;;
-    detach_iso)
-        detach_iso "$2" "$3"
-        exit 0
-        ;;
-    open)
-        open_vm "$2"
-        exit 0
-        ;;
-    edit)
-        edit_vm "$2"
-        exit 0
-        ;;
-    create)
-        # Processa os argumentos
-        process_args "$@"
-        # Verifica se a variável CDROM foi preenchida
-        # if [[ -z "$CDROM" ]]; then
-        #     echo "Erro: O parâmetro --cdrom é obrigatório."
-        #     exit 1
-        # fi
+	# Interpretação dos parâmetros
+	case "$1" in
+	-h | --help)
+		print_help
+		;;
+	--compress-only)
+		compress_only
+		;;
+	list)
+		list_vms "$2"
+		;;
+	list_variant)
+		osinfo-query os --fields=id,name,version --sort=name
+		;;
+	start)
+		start_vm "$2"
+		;;
+	stop)
+		stop_vm "$2"
+		;;
+	stop_force)
+		stop_force_vm "$2"
+		;;
+	remove)
+		remove_vm "$2"
+		;;
+	show_disk_info)
+		show_vm_disk_info "$2"
+		;;
+	show_qcow2_fdisk)
+		show_qcow2_fdisk "$2"
+		;;
+	show_qcow2_info)
+		show_qcow2_info "$2"
+		;;
+	resize_disk)
+		resize_vm_disk "$2" "$3"
+		;;
+	shrink_disk)
+		shrink_vm_disk "$2" "$3"
+		;;
+	cfdisk_qcow2)
+		cfdisk_qcow2 "$2"
+		;;
+	list_snapshots)
+		list_snapshots "$2"
+		;;
+	create_snapshot)
+		create_snapshot "$2" "$3"
+		;;
+	delete_snapshot)
+		delete_snapshot "$2" "$3"
+		;;
+	restore_snapshot)
+		restore_snapshot "$2" "$3"
+		;;
+	check_qcow2)
+		check_qcow2 "$@"
+		;;
+	check_cpus)
+		check_cpus "$1" "$2"
+		exit 0
+		;;
+	check_interfaces)
+		check_interfaces "$1" "$2"
+		exit 0
+		;;
+	check_iso)
+		check_iso "$1" "$2"
+		exit 0
+		;;
+	attach_iso)
+		attach_iso "$2" "$3"
+		exit 0
+		;;
+	detach_iso)
+		detach_iso "$2" "$3"
+		exit 0
+		;;
+	open)
+		open_vm "$2"
+		exit 0
+		;;
+	edit)
+		edit_vm "$2"
+		exit 0
+		;;
+	create)
+		# Processa os argumentos
+		process_args "$@"
+		# Verifica se a variável CDROM foi preenchida
+		# if [[ -z "$CDROM" ]]; then
+		#     echo "Erro: O parâmetro --cdrom é obrigatório."
+		#     exit 1
+		# fi
 
-        # Chama a função para criar a VM
-        create
-        exit 0
-        ;;
-    set_boot_cdrom)
-        set_boot_cdrom "$2"
-        ;;
-    check_graphics)
-        check_graphics "$2"
-        ;;
-    check_sound)
-        check_sound "$2"
-        ;;
-    *)
-        print_help
-        ;;
-    esac
+		# Chama a função para criar a VM
+		create
+		exit 0
+		;;
+	set_boot_cdrom)
+		set_boot_cdrom "$2"
+		;;
+	check_graphics)
+		check_graphics "$2"
+		;;
+	check_sound)
+		check_sound "$2"
+		;;
+	*)
+		print_help
+		;;
+	esac
 }
 # Desativa a verificação de requisitos de sistema operacional
 export VIRTINSTALL_OSINFO_DISABLE_REQUIRE
@@ -1035,4 +1294,3 @@ main "$@"
 # Se configurou SPICE: remote-viewer spice://<IP_do_host>:<porta>
 # Se configurou VNC: vncviewer <IP_do_host>:<porta>
 # Descobrir a porta usada: "$0" check_graphics MeuVM
-
