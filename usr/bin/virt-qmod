@@ -321,6 +321,19 @@ show_vm_disk_list() {
 	# --human: Formata tamanhos para G, M ou K (melhor para o YAD)
 	virsh --connect "$SESSION" domblklist --domain "$VM_NAME" --details
 }
+list_removable_media() {
+    # 1. Verifica se o nome da VM foi passado
+	if [ -z "$1" ]; then
+		echo "Erro: Nome da VM não especificado."
+		return 1
+	fi
+	local VM_NAME="$1"
+
+    # Filtra apenas CDROMs que contenham um arquivo (caminho começando com /)
+    # Saída formatada: ALVO|CAMINHO
+    show_vm_disk_list "$VM_NAME" | \
+    grep 'cdrom' | grep '/' | awk '{print $3"|"$4}'
+}
 # Função para exibir informações do arquivo .qcow2 usando fdisk -l
 show_qcow2_fdisk() {
 	if [ $# -ne 1 ]; then
@@ -1325,6 +1338,10 @@ main() {
 		;;
 	check_sound)
 		check_sound "$2"
+		;;
+	# Funções internas
+	list_removable_media)
+		list_removable_media "$2"
 		;;
 	*)
 		print_help
