@@ -305,7 +305,22 @@ show_vm_disk_info() {
 	# --human: Formata tamanhos para G, M ou K (melhor para o YAD)
 	virsh --connect "$SESSION" domblkinfo --domain "$VM_NAME" --all --human
 }
+# Função para exibir lista de disco de uma máquina virtual
+show_vm_disk_list() {
+	# 1. Verifica se o nome da VM foi passado
+	if [ -z "$1" ]; then
+		echo "Erro: Nome da VM não especificado."
+		return 1
+	fi
 
+	local VM_NAME="$1"
+
+	# 2. Comando blindado:
+	# --domain: Garante que o virsh saiba quem é a VM
+	# --all: Lista todos os discos (essencial para snapshots externos)
+	# --human: Formata tamanhos para G, M ou K (melhor para o YAD)
+	virsh --connect "$SESSION" domblklist --domain "$VM_NAME" --details
+}
 # Função para exibir informações do arquivo .qcow2 usando fdisk -l
 show_qcow2_fdisk() {
 	if [ $# -ne 1 ]; then
@@ -912,44 +927,72 @@ attach_iso() {
 
 # Função para desmontar o dispositivo de CD-ROM montado na máquina virtual (EM EDIÇÃO)
 detach_iso() {
-	[[ $# -ne 2 ]] && {
-		echo "Uso: detach_iso NOME_DA_MAQUINA CAMINHO_DA_ISO"
-		return 1
-	}
+    # 1. Verificação de Ajuda
+    if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        echo "Uso: $0 detach_iso NOME_DA_MAQUINA [CAMINHO_DA_ISO]"
+        return 1
+    fi
 
-	nome_maquina="$1"
-	caminho_iso="$2"
-	VM_NAME="$nome_maquina"
+    local nome_maquina="$1"
+    local caminho_iso="$2"
+    local VM_NAME="$nome_maquina"
 
-	# 1. Identifica o estado da VM (lidando com PT_BR e EN)
-	local estado
-	estado=$(virsh --connect "$SESSION" domstate "$VM_NAME")
+    # 2. MODO INTERATIVO (Se o caminho da ISO não for passado)
+    if [ -z "$caminho_iso" ]; then
+        echo "Modo Interativo: Localizando mídias removíveis em [$VM_NAME]..."
+        
+        # Lista apenas dispositivos de CDROM que tenham um arquivo montado
+        mapfile -t isos_montadas < <(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep 'cdrom' | grep '/' | awk '{print $4}')
 
-	# 2. Localiza o target (hdb, hdc, etc) baseado no caminho da ISO
-	local target
-	target=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep "$caminho_iso" | awk '{print $3}' | head -n 1)
+        if [ ${#isos_montadas[@]} -eq 0 ]; then
+            echo "Nenhuma ISO montada encontrada na VM [$VM_NAME]."
+            return 1
+        fi
 
-	[[ -z "$target" ]] && {
-		echo "Erro: ISO não encontrada na VM [$VM_NAME]."
-		return 1
-	}
+        echo "Mídias encontradas:"
+        for i in "${!isos_montadas[@]}"; do
+            echo "  [$i] ${isos_montadas[$i]}"
+        done
 
-	# 3. Execução baseada no estado
-	if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
-		echo "VM [$VM_NAME] está ligada. Tentando ejetar mídia..."
-		# Tenta eject-media, se falhar (comando desconhecido), usa change-media --eject
-		if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --live --config 2>/dev/null; then
-			echo "eject-media falhou. Usando change-media --eject..."
-			virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --live --config
-		fi
-	else
-		echo "VM [$VM_NAME] está desligada ($estado). Removendo mídia do XML..."
-		# Fallback similar para o estado offline
-		if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --config 2>/dev/null; then
-			echo "eject-media falhou. Usando change-media --eject no XML..."
-			virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --config
-		fi
-	fi
+        read -r -p "Selecione o número da ISO para desatachar: " escolha
+        
+        # Valida a escolha do usuário
+        if [[ "$escolha" =~ ^[0-9]+$ ]] && [ "$escolha" -lt "${#isos_montadas[@]}" ]; then
+            caminho_iso="${isos_montadas[$escolha]}"
+        else
+            echo "Escolha inválida. Operação cancelada."
+            return 1
+        fi
+    fi
+
+    # 3. Identifica o target (hdb, sda, etc) baseado no caminho
+    local target
+    target=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep "$caminho_iso" | awk '{print $3}' | head -n 1)
+
+    [[ -z "$target" ]] && {
+        echo "Erro: ISO [$caminho_iso] não encontrada no XML da VM."
+        return 1
+    }
+
+    # 4. Detecta estado e executa o Eject
+    local estado
+    estado=$(virsh --connect "$SESSION" domstate "$VM_NAME")
+
+    echo "Desatachando [$caminho_iso] do alvo [$target]..."
+
+    if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
+        # Modo Online (--live + --config para persistir)
+        if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --live --config 2>/dev/null; then
+            virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --live --config
+        fi
+    else
+        # Modo Offline (--config apenas)
+        if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --config 2>/dev/null; then
+            virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --config
+        fi
+    fi
+
+    echo "Sucesso: ISO removida com sucesso!"
 }
 
 # Verifica a configuração gráfica da VM
@@ -987,6 +1030,7 @@ print_help() {
 	echo "  stop_force <nome>      Para a VM forçadamente"
 	echo "  remove <nome>          Remove a VM"
 	echo "  show_disk_info <nome>  Exibe informações sobre o disco da VM"
+	echo "  show_disk_list <nome>  Exibe informações sobre LISTA de dispositivos da VM"
 	echo "  show_qcow2_fdisk <arquivo> Exibe informações sobre a partição do disco QCOW2"
 	echo "  show_qcow2_info <nome> Exibe informações sobre o disco QCOW2 da VM"
 	echo "  resize_disk <nome> <tamanho> Redimensiona o disco da VM"
@@ -1198,6 +1242,9 @@ main() {
 		;;
 	show_disk_info)
 		show_vm_disk_info "$2"
+		;;
+	show_disk_list)
+		show_vm_disk_list "$2"
 		;;
 	show_qcow2_fdisk)
 		show_qcow2_fdisk "$2"
