@@ -6,8 +6,28 @@ pkgver=1.0.1
 pkgrel=4
 arch=('any')
 license=('CUSTOM')
-depends=('pv' 'bc' 'qemu-base' 'virt-install' 'virt-viewer' 'bridge-utils' 'dnsmasq' 'dmidecode' 'libxml2')
-optdepends=('qemu-desktop' 'qemu-full' 'libguestfs')
+backup=('opt/virt-qmod/virt-qmod.env')
+depends=(
+	'bash'
+	'libvirt'
+	'libxml2'      # Essencial para o xmllint
+	'qemu-base'    # Provê os binários do sistema e qemu-img
+	'virt-install' # Para provisionamento
+	'util-linux'   # Para o getopt
+	'pv'           # Monitoramento de progresso (se usado no script)
+	'bc'           # Cálculos de precisão
+	'pciutils'     # lspci (detecção de hardware para pass-through)
+	'dnsmasq'      # Necessário para a funcionalidade de rede NAT do libvirt'
+)
+optdepends=(
+	'qemu-desktop: Provê os binários do sistema e qemu-img'
+	'virt-viewer: Para visualização do console da VM via SPICE/VNC'
+	'virt-manager: Interface gráfica para gerenciar as VMs criadas'
+	'libguestfs: Para manipulação de sistemas de arquivos dentro das imagens'
+	'bridge-utils: Necessário para criar interfaces de ponte (bridge)'
+	'osinfo-db: Para detecção automática de perfis de SO no virt-install'
+	'edk2-ovmf: Necessário para máquinas virtuais com Boot UEFI'
+)
 pkgdesc="Gerencia Máquinas Virtuais (VMs) utilizando a tecnologia QEMU/KVM (CLI)."
 url="https://github.com/elppans/${pkgname}"
 source=("git+${url}.git#branch=main")
@@ -16,7 +36,7 @@ md5sums=('SKIP')
 
 # Automatically detect and use the correct install file
 # if [ -e "${pkgname}.install" ]; then
-	install=${pkgname}.install
+install=${pkgname}.install
 # elif [ -e "pkgbuild.install" ]; then
 # 	install=pkgbuild.install
 # fi
@@ -56,7 +76,7 @@ package() {
 	fi
 }
 
-cat > "${pkgname}.install" <<EOF
+cat >"${pkgname}.install" <<EOF
 post_install() {
 systemctl daemon-reload
 
