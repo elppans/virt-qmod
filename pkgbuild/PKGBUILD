@@ -3,7 +3,7 @@
 
 pkgname=virt-qmod
 pkgver=1.0.1
-pkgrel=9
+pkgrel=10
 arch=('any')
 license=('CUSTOM')
 backup=('opt/virt-qmod/virt-qmod.env')

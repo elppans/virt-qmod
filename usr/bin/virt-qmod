@@ -1146,13 +1146,21 @@ create() {
 	# Cria o disco virtual
 	qemu-img --connect "$SESSION" create -f "$DISK_FORMAT" "$DISK_PATH/$NAME.qcow2" "$DISK"G &>>/dev/null
 
+	# Detecta se o sistema é Windows, se for, o tipo do Disco é SATA
+	# shellcheck disable=SC2153
+	if [[ "$OS_VARIANT" == win* ]] || [[ "$ISO" =~ (Windows|windows|Win|win) ]]; then
+    	DISK_BUS="sata"
+	else
+    	DISK_BUS="virtio"
+	fi
+
 	# Crie a definição da VM
 	virt-install --connect "$SESSION" \
 		--name "$NAME" \
 		--ram "$RAM" \
 		--vcpus "$VCPUS" \
 		--boot "$BOOT" \
-		--disk "$DISK_PATH/$NAME.qcow2,size=$DISK,bus=virtio" \
+		--disk "$DISK_PATH/$NAME.qcow2,size=$DISK,bus=$DISK_BUS" \
 		--disk "$CDROM,device=cdrom,bus=ide" \
 		--network bridge="$NETWORK",model=virtio \
 		--sound "$SOUND" \
