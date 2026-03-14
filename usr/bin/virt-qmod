@@ -1148,7 +1148,7 @@ create() {
 
 	# Detecta se o sistema é Windows, se for, o tipo do Disco é SATA
 	# shellcheck disable=SC2153
-	if [[ "$OS_VARIANT" == win* ]] || [[ "$ISO" =~ (Windows|windows|Win|win) ]]; then
+	if [[ "$OS_VARIANT" == win* ]] || [[ "$CDROM" =~ (Windows|windows|Win|win) ]]; then
     	DISK_BUS="sata"
 	else
     	DISK_BUS="virtio"
