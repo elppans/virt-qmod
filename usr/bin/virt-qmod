@@ -1131,7 +1131,7 @@ create() {
     "
 
 	# Verifica se todos os parâmetros necessários foram definidos
-	if [[ -z $SESSION || -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$BOOT" || -z "$NETWORK" || -z "$GRAPHICS" || -z "$SOUND" ]]; then
+	if [[ -z $SESSION || -z "$NAME" || -z "$RAM" || -z "$VCPUS" || -z "$DISK" || -z "$BOOT" || -z "$NETWORK" || -z "$GRAPHICS" || -z "$EXTRA_ARGS" || -z "$SOUND" ]]; then
 		echo "Erro: Todos os parâmetros (name, ram, vcpus, disk, cdrom, network, graphics) devem ser fornecidos."
 		exit 1
 	fi
@@ -1152,7 +1152,7 @@ create() {
 		--os-variant="$OSVARIANT" \
 		--noreboot \
 		--noautoconsole \
-		--graphics "${GRAPHICS}" \
+		--graphics "${GRAPHICS}" "${EXTRA_ARGS}" \
 		--boot menu="$BOOTMENU",cdrom,hd \
 		--memorybacking hugepages="$MEMORYBACKING" \
 		--osinfo detect=on,require=off
