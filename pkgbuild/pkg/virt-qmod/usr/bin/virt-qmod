@@ -19,7 +19,6 @@ if [[ -n "$SUDO_USER" ]]; then
 fi
 
 # Função para carregar ou criar o arquivo de configuração
-# Função para carregar ou criar o arquivo de configuração
 carregar_config() {
 	# Verifica se o arquivo de configuração global existe
 	if [[ ! -f "$CONFIG_GLOBAL" ]]; then
@@ -38,16 +37,21 @@ carregar_config() {
 		source "$CONFIG_FILE"
 
 		# Atualiza o arquivo do usuário com novas variáveis do global (sem sobrescrever)
-		# O grep extrai apenas nomes de variáveis (letras maiúsculas e underscores antes do =)
-		grep -oP '^[A-Z_]+(?==)' "$CONFIG_GLOBAL" | while read -r var_name; do
+		while IFS= read -r linha; do
+			# Ignora linhas vazias e comentários
+			if [[ -z "$linha" || "$linha" =~ ^# ]]; then
+				continue
+			fi
+
+			# Extrai o nome da variável
+			var_name=$(echo "$linha" | cut -d '=' -f 1)
 
 			# Se a variável não estiver definida no arquivo do usuário, adiciona-a
 			if ! grep -q "^$var_name=" "$CONFIG_FILE"; then
-				# Busca a linha completa da variável no global e anexa ao arquivo do usuário
-				grep "^$var_name=" "$CONFIG_GLOBAL" >>"$CONFIG_FILE"
+				echo "$linha" >>"$CONFIG_FILE"
 				echo "Adicionada nova variável ao arquivo do usuário: $var_name"
 			fi
-		done
+		done <"$CONFIG_GLOBAL"
 	else
 		# Se o arquivo não existir, cria o diretório de configuração
 		CONFIG_DIR="$(dirname "$CONFIG_FILE")"
@@ -58,33 +62,25 @@ carregar_config() {
 		echo "Arquivo de configuração copiado de $CONFIG_GLOBAL para $CONFIG_FILE."
 	fi
 
-	# Valida e carrega o arquivo de configuração final
+	# Carrega o arquivo de configuração do usuário (atualizado)
+	source "$CONFIG_FILE"
+
+	# Valida o arquivo de configuração
 	if ! source "$CONFIG_FILE"; then
-		echo "Erro: O arquivo de configuração em $CONFIG_FILE contém erros de sintaxe."
+		echo "Erro: O arquivo de configuração em $CONFIG_FILE contém erros."
 		exit 1
 	fi
 
-	# Verifica se as variáveis essenciais estão definidas (incluindo EXTRA_ARGS)
+	# Verifica se as variáveis essenciais estão definidas
 	variaveis_essenciais=(
 		"SESSION" "NAME" "RAM" "MEMORYBACKING" "VCPUS" "DISK" "BOOT"
 		"BOOTMENU" "NETWORK" "SOUND" "GRAPHICS" "DISK_FORMAT" "DISK_PATH"
-		"OSTYPE" "OSVARIANT" "VIRTINSTALL_OSINFO_DISABLE_REQUIRE" "EXTRA_ARGS"
+		"OSTYPE" "OSVARIANT" "VIRTINSTALL_OSINFO_DISABLE_REQUIRE"
 	)
-
 	for var in "${variaveis_essenciais[@]}"; do
 		if [[ -z "${!var}" ]]; then
-			# Se for um array, verificamos se ele tem elementos
-			if [[ "$(declare -p "$var" 2>/dev/null)" =~ "declare -a" ]]; then
-				# Criamos uma referência nominal para a variável cujo nome está em $var
-				local -n ref_var="$var"
-				if [[ ${#ref_var[@]} -eq 0 ]]; then
-					echo "Erro: O Array '$var' está vazio."
-					exit 1
-				fi
-			else
-				echo "Erro: A variável '$var' não está definida ou está vazia."
-				exit 1
-			fi
+			echo "Erro: A variável '$var' não está definida no arquivo de configuração."
+			exit 1
 		fi
 	done
 
@@ -326,17 +322,17 @@ show_vm_disk_list() {
 	virsh --connect "$SESSION" domblklist --domain "$VM_NAME" --details
 }
 list_removable_media() {
-	# 1. Verifica se o nome da VM foi passado
+    # 1. Verifica se o nome da VM foi passado
 	if [ -z "$1" ]; then
 		echo "Erro: Nome da VM não especificado."
 		return 1
 	fi
 	local VM_NAME="$1"
 
-	# Filtra apenas CDROMs que contenham um arquivo (caminho começando com /)
-	# Saída formatada: ALVO|CAMINHO
-	show_vm_disk_list "$VM_NAME" |
-		grep 'cdrom' | grep '/' | awk '{print $3"|"$4}'
+    # Filtra apenas CDROMs que contenham um arquivo (caminho começando com /)
+    # Saída formatada: ALVO|CAMINHO
+    show_vm_disk_list "$VM_NAME" | \
+    grep 'cdrom' | grep '/' | awk '{print $3"|"$4}'
 }
 # Função para exibir informações do arquivo .qcow2 usando fdisk -l
 show_qcow2_fdisk() {
@@ -563,10 +559,10 @@ list_snapshots() {
 create_snapshot() {
 	# Validação: o nome da VM é obrigatório
 	# Verificação de Ajuda
-	if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
-		print_help_create_snapshot
-		return 1
-	fi
+    if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        print_help_create_snapshot
+        return 1
+    fi
 
 	local nome_maquina="$1"
 	local nome_snapshot="$2"
@@ -629,96 +625,93 @@ commit_snapshot() {
 # Função para excluir um snapshot de uma VM
 # --- Função Principal de Deleção ---
 delete_snapshot() {
-	if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
-		print_help_delete_snapshot
-		return 1
-	fi
+    if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        print_help_delete_snapshot
+        return 1
+    fi
 
-	local nome_maquina="$1"
-	local nome_snapshot="$2"
-	local opcao="$3"
+    local nome_maquina="$1"
+    local nome_snapshot="$2"
+    local opcao="$3"
 
-	# 1. MODO INTERATIVO
-	if [ -z "$nome_snapshot" ]; then
-		echo "Modo Interativo: Localizando snapshots para [$nome_maquina]..."
-		virsh --connect "$SESSION" snapshot-list "$nome_maquina"
-		echo ""
-		read -r -p "Digite o nome do snapshot que deseja DELETAR: " nome_snapshot
-		[[ -z "$nome_snapshot" ]] && {
-			echo "Operação cancelada."
-			return 1
-		}
-		read -r -p "Deseja remover apenas os METADADOS (m) ou realizar o COMMIT e DELETAR TUDO (t)? [m/t]: " tipo_del
-		if [[ "$tipo_del" == "m" || "$tipo_del" == "M" ]]; then opcao="--meta"; else opcao="--full"; fi
-	fi
+    # 1. MODO INTERATIVO
+    if [ -z "$nome_snapshot" ]; then
+        echo "Modo Interativo: Localizando snapshots para [$nome_maquina]..."
+        virsh --connect "$SESSION" snapshot-list "$nome_maquina"
+        echo ""
+        read -r -p "Digite o nome do snapshot que deseja DELETAR: " nome_snapshot
+        [[ -z "$nome_snapshot" ]] && { echo "Operação cancelada."; return 1; }
+        read -r -p "Deseja remover apenas os METADADOS (m) ou realizar o COMMIT e DELETAR TUDO (t)? [m/t]: " tipo_del
+        if [[ "$tipo_del" == "m" || "$tipo_del" == "M" ]]; then opcao="--meta"; else opcao="--full"; fi
+    fi
 
-	# 2. CAPTURA DE DADOS (Antes de qualquer alteração)
-	# Pegamos o arquivo atual do snapshot
-	local arquivo_snap
-	arquivo_snap=$(virsh --connect "$SESSION" snapshot-dumpxml "$nome_maquina" "$nome_snapshot" | xmllint --xpath "string(/domainsnapshot/disks/disk/source/@file)" - 2>/dev/null)
+    # 2. CAPTURA DE DADOS (Antes de qualquer alteração)
+    # Pegamos o arquivo atual do snapshot
+    local arquivo_snap
+    arquivo_snap=$(virsh --connect "$SESSION" snapshot-dumpxml "$nome_maquina" "$nome_snapshot" | xmllint --xpath "string(/domainsnapshot/disks/disk/source/@file)" - 2>/dev/null)
+    
+    # Pegamos o arquivo BASE (pai) usando qemu-img info
+    local arquivo_base
+    arquivo_base=$(sudo qemu-img info "$arquivo_snap" 2>/dev/null | grep "backing file:" | cut -d ':' -f2- | xargs)
 
-	# Pegamos o arquivo BASE (pai) usando qemu-img info
-	local arquivo_base
-	arquivo_base=$(sudo qemu-img info "$arquivo_snap" 2>/dev/null | grep "backing file:" | cut -d ':' -f2- | xargs)
+    # 3. EXECUÇÃO
+    if [[ "$opcao" == "--meta" ]]; then
+        echo "Removendo apenas metadados..."
+        virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata
+    else
+        echo "Iniciando consolidação total (Commit + Delete) de [$nome_snapshot]..."
+        
+        # Verifica se a VM está ativa
+        local vm_ativa=false
+        if virsh --connect "$SESSION" list --name | grep -q -w "$nome_maquina"; then
+            vm_ativa=true
+        fi
 
-	# 3. EXECUÇÃO
-	if [[ "$opcao" == "--meta" ]]; then
-		echo "Removendo apenas metadados..."
-		virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata
-	else
-		echo "Iniciando consolidação total (Commit + Delete) de [$nome_snapshot]..."
+        if commit_snapshot "$nome_maquina" "$nome_snapshot"; then
+            
+            # SE ESTIVER OFFLINE: Forçamos o Libvirt a esquecer o snapshot e usar o base
+# CORREÇÃO OFFLINE BLINDADA
+            if [ "$vm_ativa" = false ]; then
+                if [ -n "$arquivo_base" ]; then
+                    echo "VM Offline: Redefinindo hierarquia de disco para o base..."
+                    
+                    # 1. Extraímos o XML
+                    # 2. Removemos TODA a seção <backingStore> (que causa o erro de lock)
+                    # 3. Trocamos o arquivo de snapshot pelo base
+                    # 4. Redefinimos a VM
+                    virsh --connect "$SESSION" dumpxml "$nome_maquina" | \
+                    perl -0777 -pe 's/<backingStore.*?>.*?<\/backingStore>//gs' | \
+                    sed "s|source file='$arquivo_snap'|source file='$arquivo_base'|g" | \
+                    virsh --connect "$SESSION" define /dev/stdin > /dev/null
+                    
+                    echo "Hierarquia limpa e apontando para: [$arquivo_base]"
+                else
+                    echo "Aviso: Arquivo base não encontrado. O XML pode precisar de ajuste manual."
+                fi
+            fi
 
-		# Verifica se a VM está ativa
-		local vm_ativa=false
-		if virsh --connect "$SESSION" list --name | grep -q -w "$nome_maquina"; then
-			vm_ativa=true
-		fi
-
-		if commit_snapshot "$nome_maquina" "$nome_snapshot"; then
-
-			# SE ESTIVER OFFLINE: Forçamos o Libvirt a esquecer o snapshot e usar o base
-			# CORREÇÃO OFFLINE BLINDADA
-			if [ "$vm_ativa" = false ]; then
-				if [ -n "$arquivo_base" ]; then
-					echo "VM Offline: Redefinindo hierarquia de disco para o base..."
-
-					# 1. Extraímos o XML
-					# 2. Removemos TODA a seção <backingStore> (que causa o erro de lock)
-					# 3. Trocamos o arquivo de snapshot pelo base
-					# 4. Redefinimos a VM
-					virsh --connect "$SESSION" dumpxml "$nome_maquina" |
-						perl -0777 -pe 's/<backingStore.*?>.*?<\/backingStore>//gs' |
-						sed "s|source file='$arquivo_snap'|source file='$arquivo_base'|g" |
-						virsh --connect "$SESSION" define /dev/stdin >/dev/null
-
-					echo "Hierarquia limpa e apontando para: [$arquivo_base]"
-				else
-					echo "Aviso: Arquivo base não encontrado. O XML pode precisar de ajuste manual."
-				fi
-			fi
-
-			# Deleta os registros de snapshot do Libvirt
-			virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata --children
-
-			# Remove o arquivo físico
-			if [ -f "$arquivo_snap" ]; then
-				rm -f "$arquivo_snap"
-				echo "Arquivo físico removido. HD limpo!"
-			fi
-			echo "Operação concluída com sucesso."
-		else
-			echo "Erro crítico: Falha no commit. Operação abortada."
-			return 1
-		fi
-	fi
+            # Deleta os registros de snapshot do Libvirt
+            virsh --connect "$SESSION" snapshot-delete "$nome_maquina" "$nome_snapshot" --metadata --children
+            
+            # Remove o arquivo físico
+            if [ -f "$arquivo_snap" ]; then
+                rm -f "$arquivo_snap"
+                echo "Arquivo físico removido. HD limpo!"
+            fi
+            echo "Operação concluída com sucesso."
+        else
+            echo "Erro crítico: Falha no commit. Operação abortada."
+            return 1
+        fi
+    fi
 }
 
 # Função para restaurar um snapshot específico de uma VM
 restore_snapshot() {
 	if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
-		print_help_restore_snapshot
-		return 1
-	fi
+        print_help_restore_snapshot
+        return 1
+    fi
 	local nome_maquina="$1"
 	local nome_snapshot="$2"
 
@@ -947,72 +940,72 @@ attach_iso() {
 
 # Função para desmontar o dispositivo de CD-ROM montado na máquina virtual (EM EDIÇÃO)
 detach_iso() {
-	# 1. Verificação de Ajuda
-	if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
-		echo "Uso: $0 detach_iso NOME_DA_MAQUINA [CAMINHO_DA_ISO]"
-		return 1
-	fi
+    # 1. Verificação de Ajuda
+    if [ -z "$1" ] || [[ "$1" =~ ^(-h|-H|--help|--HELP)$ ]]; then
+        echo "Uso: $0 detach_iso NOME_DA_MAQUINA [CAMINHO_DA_ISO]"
+        return 1
+    fi
 
-	local nome_maquina="$1"
-	local caminho_iso="$2"
-	local VM_NAME="$nome_maquina"
+    local nome_maquina="$1"
+    local caminho_iso="$2"
+    local VM_NAME="$nome_maquina"
 
-	# 2. MODO INTERATIVO (Se o caminho da ISO não for passado)
-	if [ -z "$caminho_iso" ]; then
-		echo "Modo Interativo: Localizando mídias removíveis em [$VM_NAME]..."
+    # 2. MODO INTERATIVO (Se o caminho da ISO não for passado)
+    if [ -z "$caminho_iso" ]; then
+        echo "Modo Interativo: Localizando mídias removíveis em [$VM_NAME]..."
+        
+        # Lista apenas dispositivos de CDROM que tenham um arquivo montado
+        mapfile -t isos_montadas < <(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep 'cdrom' | grep '/' | awk '{print $4}')
 
-		# Lista apenas dispositivos de CDROM que tenham um arquivo montado
-		mapfile -t isos_montadas < <(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep 'cdrom' | grep '/' | awk '{print $4}')
+        if [ ${#isos_montadas[@]} -eq 0 ]; then
+            echo "Nenhuma ISO montada encontrada na VM [$VM_NAME]."
+            return 1
+        fi
 
-		if [ ${#isos_montadas[@]} -eq 0 ]; then
-			echo "Nenhuma ISO montada encontrada na VM [$VM_NAME]."
-			return 1
-		fi
+        echo "Mídias encontradas:"
+        for i in "${!isos_montadas[@]}"; do
+            echo "  [$i] ${isos_montadas[$i]}"
+        done
 
-		echo "Mídias encontradas:"
-		for i in "${!isos_montadas[@]}"; do
-			echo "  [$i] ${isos_montadas[$i]}"
-		done
+        read -r -p "Selecione o número da ISO para desatachar: " escolha
+        
+        # Valida a escolha do usuário
+        if [[ "$escolha" =~ ^[0-9]+$ ]] && [ "$escolha" -lt "${#isos_montadas[@]}" ]; then
+            caminho_iso="${isos_montadas[$escolha]}"
+        else
+            echo "Escolha inválida. Operação cancelada."
+            return 1
+        fi
+    fi
 
-		read -r -p "Selecione o número da ISO para desatachar: " escolha
+    # 3. Identifica o target (hdb, sda, etc) baseado no caminho
+    local target
+    target=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep "$caminho_iso" | awk '{print $3}' | head -n 1)
 
-		# Valida a escolha do usuário
-		if [[ "$escolha" =~ ^[0-9]+$ ]] && [ "$escolha" -lt "${#isos_montadas[@]}" ]; then
-			caminho_iso="${isos_montadas[$escolha]}"
-		else
-			echo "Escolha inválida. Operação cancelada."
-			return 1
-		fi
-	fi
+    [[ -z "$target" ]] && {
+        echo "Erro: ISO [$caminho_iso] não encontrada no XML da VM."
+        return 1
+    }
 
-	# 3. Identifica o target (hdb, sda, etc) baseado no caminho
-	local target
-	target=$(virsh --connect "$SESSION" domblklist "$VM_NAME" --details | grep "$caminho_iso" | awk '{print $3}' | head -n 1)
+    # 4. Detecta estado e executa o Eject
+    local estado
+    estado=$(virsh --connect "$SESSION" domstate "$VM_NAME")
 
-	[[ -z "$target" ]] && {
-		echo "Erro: ISO [$caminho_iso] não encontrada no XML da VM."
-		return 1
-	}
+    echo "Desatachando [$caminho_iso] do alvo [$target]..."
 
-	# 4. Detecta estado e executa o Eject
-	local estado
-	estado=$(virsh --connect "$SESSION" domstate "$VM_NAME")
+    if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
+        # Modo Online (--live + --config para persistir)
+        if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --live --config 2>/dev/null; then
+            virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --live --config
+        fi
+    else
+        # Modo Offline (--config apenas)
+        if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --config 2>/dev/null; then
+            virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --config
+        fi
+    fi
 
-	echo "Desatachando [$caminho_iso] do alvo [$target]..."
-
-	if [[ "$estado" == "executando" || "$estado" == "running" ]]; then
-		# Modo Online (--live + --config para persistir)
-		if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --live --config 2>/dev/null; then
-			virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --live --config
-		fi
-	else
-		# Modo Offline (--config apenas)
-		if ! virsh --connect "$SESSION" eject-media "$VM_NAME" "$target" --config 2>/dev/null; then
-			virsh --connect "$SESSION" change-media "$VM_NAME" "$target" --eject --config
-		fi
-	fi
-
-	echo "Sucesso: ISO removida com sucesso!"
+    echo "Sucesso: ISO removida com sucesso!"
 }
 
 # Verifica a configuração gráfica da VM
@@ -1071,53 +1064,53 @@ print_help() {
 	echo "  set_boot_cdrom <nome>     Define ordem de boot para inicializar primeiro pelo CD-ROM antes do HD"
 }
 print_help_create_snapshot() {
-	echo "virt-qmod - Gerenciador de Snapshots Libvirt"
-	echo ""
-	echo "Uso: $0 create_snapshot [NOME_VM] [NOME_SNAPSHOT]"
-	echo ""
-	echo "Descrição:"
-	echo "  Cria um novo snapshot externo (disk-only) para a máquina virtual."
-	echo ""
-	echo "Argumentos:"
-	echo "  NOME_VM        Nome da máquina virtual."
-	echo "  NOME_SNAPSHOT  (Opcional) Nome para o snapshot. Se omitido, usa o padrão: VM-snap-DATA-HORA."
-	echo ""
-	echo "Opções automáticas:"
-	echo "  --disk-only    Garante que o snapshot seja externo (cria um novo arquivo .qcow2)."
-	echo "  --quiesce      Tenta garantir a integridade do FS via Guest Agent."
+    echo "virt-qmod - Gerenciador de Snapshots Libvirt"
+    echo ""
+    echo "Uso: $0 create_snapshot [NOME_VM] [NOME_SNAPSHOT]"
+    echo ""
+    echo "Descrição:"
+    echo "  Cria um novo snapshot externo (disk-only) para a máquina virtual."
+    echo ""
+    echo "Argumentos:"
+    echo "  NOME_VM        Nome da máquina virtual."
+    echo "  NOME_SNAPSHOT  (Opcional) Nome para o snapshot. Se omitido, usa o padrão: VM-snap-DATA-HORA."
+    echo ""
+    echo "Opções automáticas:"
+    echo "  --disk-only    Garante que o snapshot seja externo (cria um novo arquivo .qcow2)."
+    echo "  --quiesce      Tenta garantir a integridade do FS via Guest Agent."
 }
 print_help_delete_snapshot() {
-	echo "virt-qmod - Gerenciador de Snapshots Libvirt"
-	echo ""
-	echo "Uso: $0 delete_snapshot NOME_VM [NOME_SNAP] [OPÇÃO]"
-	echo ""
-	echo "Comandos:"
-	echo "  Se omitir [NOME_SNAP]: Entra no modo interativo assistido."
-	echo ""
-	echo "Opções no Modo Direto:"
-	echo "  (padrão)    Realiza o COMMIT (mescla dados) e apaga o arquivo físico."
-	echo "  --meta      Remove apenas a referência no Libvirt (metadados)."
-	echo ""
-	echo "Exemplos:"
-	echo "  $0 delete_snapshot minha-vm                   # Interativo"
-	echo "  $0 delete_snapshot minha-vm snap-01            # Commit + Delete"
-	echo "  $0 delete_snapshot minha-vm snap-01 --meta     # Só metadados"
+    echo "virt-qmod - Gerenciador de Snapshots Libvirt"
+    echo ""
+    echo "Uso: $0 delete_snapshot NOME_VM [NOME_SNAP] [OPÇÃO]"
+    echo ""
+    echo "Comandos:"
+    echo "  Se omitir [NOME_SNAP]: Entra no modo interativo assistido."
+    echo ""
+    echo "Opções no Modo Direto:"
+    echo "  (padrão)    Realiza o COMMIT (mescla dados) e apaga o arquivo físico."
+    echo "  --meta      Remove apenas a referência no Libvirt (metadados)."
+    echo ""
+    echo "Exemplos:"
+    echo "  $0 delete_snapshot minha-vm                   # Interativo"
+    echo "  $0 delete_snapshot minha-vm snap-01            # Commit + Delete"
+    echo "  $0 delete_snapshot minha-vm snap-01 --meta     # Só metadados"
 }
 print_help_restore_snapshot() {
-	echo "virt-qmod - Gerenciador de Snapshots Libvirt"
-	echo ""
-	echo "Uso: $0 restore_snapshot [NOME_VM] [NOME_SNAPSHOT]"
-	echo ""
-	echo "Descrição:"
-	echo "  Retorna o estado da máquina virtual para um snapshot específico."
-	echo ""
-	echo "Argumentos:"
-	echo "  NOME_VM        Nome da máquina virtual cadastrada no Libvirt."
-	echo "  NOME_SNAPSHOT  (Opcional) Nome do snapshot. Se omitido, o script listará os disponíveis."
-	echo ""
-	echo "Exemplos:"
-	echo "  $0 restore_snapshot minha-vm snap-estavel-v1"
-	echo "  $0 restore_snapshot minha-vm"
+    echo "virt-qmod - Gerenciador de Snapshots Libvirt"
+    echo ""
+    echo "Uso: $0 restore_snapshot [NOME_VM] [NOME_SNAPSHOT]"
+    echo ""
+    echo "Descrição:"
+    echo "  Retorna o estado da máquina virtual para um snapshot específico."
+    echo ""
+    echo "Argumentos:"
+    echo "  NOME_VM        Nome da máquina virtual cadastrada no Libvirt."
+    echo "  NOME_SNAPSHOT  (Opcional) Nome do snapshot. Se omitido, o script listará os disponíveis."
+    echo ""
+    echo "Exemplos:"
+    echo "  $0 restore_snapshot minha-vm snap-estavel-v1"
+    echo "  $0 restore_snapshot minha-vm"
 }
 # Função para criar a máquina virtual com os parâmetros definidos
 create() {
