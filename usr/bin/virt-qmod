@@ -1152,7 +1152,7 @@ create() {
 		--os-variant="$OSVARIANT" \
 		--noreboot \
 		--noautoconsole \
-		--graphics "${GRAPHICS}" "${EXTRA_ARGS}" \
+		--graphics "${GRAPHICS[@]}" "${EXTRA_ARGS[@]}" \
 		--boot menu="$BOOTMENU",cdrom,hd \
 		--memorybacking hugepages="$MEMORYBACKING" \
 		--osinfo detect=on,require=off
