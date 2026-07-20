@@ -1168,7 +1168,7 @@ create() {
 		--noreboot \
 		--noautoconsole \
 		--graphics "${GRAPHICS[@]}" "${EXTRA_ARGS[@]}" \
-		--boot menu="$BOOTMENU",cdrom,hd \
+		--boot menu="$BOOTMENU",hd,cdrom \
 		--memorybacking hugepages="$MEMORYBACKING" \
 		--osinfo detect=on,require=off
 
