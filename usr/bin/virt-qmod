@@ -247,8 +247,60 @@ list_vms() {
 
 # Função para Abrir o Virt Viewer para mostrar a tela da VM especificada
 open_vm() {
-	# Abre o Virt Viewer com a VM especificada pelo nome
-	virt-viewer --connect "$SESSION" --reconnect --zoom=100 --direct --attach --auto-resize=always --cursor=auto --shared "$1"
+	# Abre a VM especificada pelo nome (parâmetro $1)
+	# Prioridade: virt-viewer > virt-manager > virsh
+
+	if command -v virt-viewer >/dev/null 2>&1; then
+		# 1) virt-viewer existe: usa ele
+		virt-viewer --connect "$SESSION" --reconnect --zoom=100 --direct --attach --auto-resize=always --cursor=auto --shared "$1"
+
+	elif command -v virt-manager >/dev/null 2>&1; then
+		# 2) virt-viewer não existe, mas virt-manager sim: abre o console da VM
+		virt-manager --connect "$SESSION" --show-domain-console "$1"
+
+	elif command -v virsh >/dev/null 2>&1; then
+		# Descobre o tipo de display da VM (spice ou vnc)
+		uri=$(virsh --connect "$SESSION" domdisplay "$1" 2>/dev/null)
+
+		if [ -z "$uri" ]; then
+			echo "Erro: a VM '$1' não está ligada ou não expõe display." >&2
+			return 1
+		fi
+
+		case "$uri" in
+			spice://*)
+				if command -v spicy >/dev/null 2>&1; then
+					spicy --uri "$uri"
+				else
+					echo "Erro: a VM usa SPICE, mas o spicy não está instalado." >&2
+					return 1
+				fi
+				;;
+			vnc://*)
+				if command -v vncviewer >/dev/null 2>&1; then
+					# vncdisplay devolve host:display, formato que o vncviewer entende
+					addr=$(virsh --connect "$SESSION" vncdisplay "$1" 2>/dev/null)
+					if [ -z "$addr" ]; then
+						echo "Erro: não foi possível obter host:display VNC da VM '$1'." >&2
+						return 1
+					fi
+					vncviewer "$addr"
+				else
+					echo "Erro: a VM usa VNC, mas o vncviewer não está instalado." >&2
+					return 1
+				fi
+				;;
+			*)
+				echo "Erro: tipo de display não suportado: $uri" >&2
+				return 1
+				;;
+		esac
+
+	else
+		# 3) Nenhum dos três está instalado
+		echo "Erro: nem virt-viewer nem virt-manager e nem virsh foram encontrados." >&2
+		return 1
+	fi
 }
 
 # Função para edição manual do XML da Máquina Virtual especificada.
